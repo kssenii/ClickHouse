@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cerrno>
 #include <vector>
 #include <memory>
@@ -17,15 +18,26 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int POCO_EXCEPTION;
+    extern const int LOGICAL_ERROR;
 }
 
 class Exception : public Poco::Exception
 {
 public:
     Exception() {}  /// For deferred initialization.
-    Exception(const std::string & msg, int code) : Poco::Exception(msg, code) {}
+
+    Exception(const std::string & msg, int code) : Poco::Exception(msg, code)
+    {
+        // In debug builds, treat LOGICAL_ERRORs as assertion failure.
+        assert(code != ErrorCodes::LOGICAL_ERROR);
+    }
+
     Exception(const std::string & msg, const Exception & nested_exception, int code)
-        : Poco::Exception(msg, nested_exception, code), trace(nested_exception.trace) {}
+        : Poco::Exception(msg, nested_exception, code), trace(nested_exception.trace)
+    {
+        // In debug builds, treat LOGICAL_ERRORs as assertion failure.
+        assert(code != ErrorCodes::LOGICAL_ERROR);
+    }
 
     enum CreateFromPocoTag { CreateFromPoco };
     Exception(CreateFromPocoTag, const Poco::Exception & exc) : Poco::Exception(exc.displayText(), ErrorCodes::POCO_EXCEPTION) {}
