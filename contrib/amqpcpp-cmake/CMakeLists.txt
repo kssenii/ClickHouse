@@ -99,31 +99,33 @@ set(SRCS
         ${AMQPCPP_DIR}/src/transactionselectframe.h
         ${AMQPCPP_DIR}/src/transactionselectokframe.h
 
-        ${AMQPCPP_DIR}/src/linux_tcp/addressinfo.h
-        ${AMQPCPP_DIR}/src/linux_tcp/function.h
-        ${AMQPCPP_DIR}/src/linux_tcp/includes.h
-        ${AMQPCPP_DIR}/src/linux_tcp/openssl.cpp
-        ${AMQPCPP_DIR}/src/linux_tcp/openssl.h
-        ${AMQPCPP_DIR}/src/linux_tcp/pipe.h
-        ${AMQPCPP_DIR}/src/linux_tcp/poll.h
-        ${AMQPCPP_DIR}/src/linux_tcp/sslconnected.h
-        ${AMQPCPP_DIR}/src/linux_tcp/sslcontext.h
-        ${AMQPCPP_DIR}/src/linux_tcp/sslhandshake.h
-        ${AMQPCPP_DIR}/src/linux_tcp/sslshutdown.h
-        ${AMQPCPP_DIR}/src/linux_tcp/sslwrapper.h
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpclosed.h
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpconnected.h
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpconnection.cpp
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpextstate.h
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpinbuffer.h
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpoutbuffer.h
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpresolver.h
-        ${AMQPCPP_DIR}/src/linux_tcp/tcpstate.h
+                ${AMQPCPP_DIR}/src/linux_tcp/addressinfo.h
+                ${AMQPCPP_DIR}/src/linux_tcp/function.h
+                ${AMQPCPP_DIR}/src/linux_tcp/includes.h
+                ${AMQPCPP_DIR}/src/linux_tcp/openssl.cpp
+                ${AMQPCPP_DIR}/src/linux_tcp/openssl.h
+                ${AMQPCPP_DIR}/src/linux_tcp/pipe.h
+                ${AMQPCPP_DIR}/src/linux_tcp/poll.h
+                ${AMQPCPP_DIR}/src/linux_tcp/sslconnected.h
+                ${AMQPCPP_DIR}/src/linux_tcp/sslcontext.h
+                ${AMQPCPP_DIR}/src/linux_tcp/sslhandshake.h
+                ${AMQPCPP_DIR}/src/linux_tcp/sslshutdown.h
+                ${AMQPCPP_DIR}/src/linux_tcp/sslwrapper.h
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpclosed.h
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpconnected.h
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpconnection.cpp
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpextstate.h
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpinbuffer.h
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpoutbuffer.h
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpresolver.h
+                ${AMQPCPP_DIR}/src/linux_tcp/tcpstate.h
         )
 
 add_library(AMQP-CPP ${SRCS})
 
 target_include_directories(AMQP-CPP PRIVATE ${AMQPCPP_DIR}/include/amqpcpp)
+target_include_directories(AMQP-CPP PUBLIC ${OPENSSL_SOURCE_DIR}/)
 target_include_directories(AMQP-CPP PRIVATE ${AMQPCPP_DIR}/include/amqpcpp/linux_tcp)
 target_include_directories(AMQP-CPP SYSTEM PUBLIC ${AMQPCPP_DIR}/include)
-
+#target_link_libraries(ssl crypto)
+target_link_libraries (AMQP-CPP PRIVATE ${OPENSSL_CRYPTO_LIBRARY})

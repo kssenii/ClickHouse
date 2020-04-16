@@ -81,13 +81,17 @@ StorageRabbitMQ::StorageRabbitMQ(
         , skip_broken(skip_broken_)
         , log(&Logger::get("StorageRabbitMQ (" + table_id_.table_name + ")"))
         , semaphore(0, num_consumers_)
-        , connection_handler(parseAddress(host_port, 5672), log)
-        , connection(&connection_handler,
-                     AMQP::Login(connection_handler.get_user_name(), connection_handler.get_password()), "/")
+        , connection_handler(log)
+        , address(parseAddress(host_port, 15672).first, parseAddress(host_port, 15672).second, AMQP::Login("root", "clickhouse"), "private")
+        //, address(AMQP::Address("amqp://clickhouse:root@rabbitmq1:15672/private"))
+        , connection(&connection_handler, address)
 {
     setColumns(columns_);
     task = global_context.getSchedulePool().createTask(log->name(), [this]{ threadFunc(); });
     task->deactivate();
+
+    LOG_DEBUG(log, "Is connection ready? - " + std::to_string(connection.ready()));
+    LOG_DEBUG(log, "Is connection usable? - " + std::to_string(connection.usable()));
 }
 
 
@@ -142,13 +146,13 @@ void StorageRabbitMQ::startup()
     task->activateAndSchedule();
 
     LOG_DEBUG(log, "Available channels: " + std::to_string(connection.channels()));
-    LOG_DEBUG(log, "Has the connection failed? -" + std::to_string(connection.fail("Connection failed!")));
 }
 
 
 void StorageRabbitMQ::shutdown()
 {
     LOG_DEBUG(log, "Closing consumers");
+
     stream_cancelled = true;
 
     for (size_t i = 0; i < num_created_consumers; ++i)
@@ -157,6 +161,7 @@ void StorageRabbitMQ::shutdown()
     }
 
     connection.close();
+
     task->deactivate();
 }
 
@@ -208,7 +213,7 @@ ProducerBufferPtr StorageRabbitMQ::createWriteBuffer()
     /// Sharing one channel between publishers
     if (!publishing_channel)
     {
-        publishing_channel = std::make_shared<AMQP::Channel>(&connection);
+        publishing_channel = std::make_shared<AMQP::TcpChannel>(&connection);
 
         publishing_channel->confirmSelect()
             .onSuccess([&]()
@@ -239,7 +244,7 @@ ConsumerBufferPtr StorageRabbitMQ::createReadBuffer()
     if (!batch_size)
         batch_size = settings.max_block_size.value;
 
-    return std::make_shared<ReadBufferFromRabbitMQConsumer>(std::make_shared<AMQP::Channel>(&connection),
+    return std::make_shared<ReadBufferFromRabbitMQConsumer>(std::make_shared<AMQP::TcpChannel>(&connection),
             log, batch_size, stream_cancelled);
 }
 

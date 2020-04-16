@@ -62,7 +62,7 @@ def rabbitmq_check_result(result, check=False, ref_file='test_rabbitmq_json.refe
 
 
 def callback(ch, method, properties, body):
-    assert 0 # means it worked!
+    assert 0
 
 
 # Fixtures
@@ -94,8 +94,13 @@ def rabbitmq_setup_teardown():
 
 #@pytest.mark.timeout(180)
 #def test_rabbitmq_basic_commands(rabbitmq_cluster):
-#    publisher_connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', port=5672))
-#    consumer_connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', port=5672))
+#    credentials = pika.PlainCredentials('root', 'clickhouse')
+#    parameters = pika.ConnectionParameters('localhost',
+#                                       5672,
+#                                       'private',
+#                                       credentials)
+#    publisher_connection = pika.BlockingConnection(parameters)
+#    consumer_connection = pika.BlockingConnection(parameters)
 #
 #    consumer = consumer_connection.channel()
 #    consumer.exchange_declare(exchange='direct_exchange', exchange_type='direct')
@@ -105,6 +110,7 @@ def rabbitmq_setup_teardown():
 #    consumer.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=True)
 #
 #    messages = []
+#    cnt_received = 0
 #    for i in range(25):
 #        messages.append(json.dumps({'key': i, 'value': i}))
 #
@@ -136,7 +142,12 @@ def test_rabbitmq_settings_new_syntax(rabbitmq_cluster):
                      rabbitmq_row_delimiter = '\\n';
         ''')
 
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', port=5672))
+    credentials = pika.PlainCredentials('root', 'clickhouse')
+    parameters = pika.ConnectionParameters('localhost',
+                                       5672,
+                                       'private',
+                                       credentials)
+    connection = pika.BlockingConnection(parameters)
 
     messages = []
     for i in range(25):
@@ -154,6 +165,8 @@ def test_rabbitmq_settings_new_syntax(rabbitmq_cluster):
     for message in messages:
         channel.basic_publish(exchange='direct_exchange', routing_key='new', body=message)
 
+    connection.close()
+
     result = ''
     while True:
         result += instance.query('SELECT * FROM test.rabbitmq', ignore_error=False)
@@ -162,7 +175,6 @@ def test_rabbitmq_settings_new_syntax(rabbitmq_cluster):
         if rabbitmq_check_result(result):
             break
 
-    connection.close()
     rabbitmq_check_result(result, True)
 
 

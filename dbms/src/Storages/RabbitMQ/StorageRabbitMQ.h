@@ -17,7 +17,7 @@
 namespace DB
 {
 
-using ChannelPtr = std::shared_ptr<AMQP::Channel>;
+using ChannelPtr = std::shared_ptr<AMQP::TcpChannel>;
 
 class StorageRabbitMQ final: public ext::shared_ptr_helper<StorageRabbitMQ>, public IStorage
 {
@@ -84,7 +84,8 @@ private:
     std::vector<ConsumerBufferPtr> buffers; /// available buffers for RabbitMQ consumers
 
     RabbitMQHandler connection_handler;
-    AMQP::Connection connection;
+    AMQP::Address address;
+    AMQP::TcpConnection connection;
 
     ChannelPtr publishing_channel; /// Shared between all publishers
     ChannelPtr consumer_channel; /// Unique to consumer
