@@ -87,6 +87,7 @@ private:
     event_base * producersEvbase;
     RabbitMQHandler producersEventHandler;
     AMQP::TcpConnection producersConnection;
+    std::mutex producer_mutex;
 
     Poco::Semaphore semaphore;
     std::mutex mutex;

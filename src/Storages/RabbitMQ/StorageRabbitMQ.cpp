@@ -75,7 +75,7 @@ StorageRabbitMQ::StorageRabbitMQ(
         , semaphore(0, num_consumers_)
         , parsed_address(parseAddress(global_context.getMacros()->expand(host_port_), 5672))
         , producersEvbase(event_base_new())
-        , producersEventHandler(producersEvbase, log)
+        , producersEventHandler(producersEvbase, log, std::ref(producer_mutex))
         , producersConnection(&producersEventHandler,
           AMQP::Address(parsed_address.first, parsed_address.second, AMQP::Login("root", "clickhouse"), "/"))
 {
@@ -203,7 +203,7 @@ ConsumerBufferPtr StorageRabbitMQ::popReadBuffer(std::chrono::milliseconds timeo
 ProducerBufferPtr StorageRabbitMQ::createWriteBuffer()
 {
     return std::make_shared<WriteBufferToRabbitMQProducer>(std::make_shared<AMQP::TcpChannel>(&producersConnection), producersEventHandler,
-            routing_key, exchange_name, log, num_consumers, bind_by_id, hash_exchange,
+            routing_key, exchange_name, producer_mutex, log, num_consumers, bind_by_id, hash_exchange,
             row_delimiter ? std::optional<char>{row_delimiter} : std::nullopt, 1, 1024);
 }
 

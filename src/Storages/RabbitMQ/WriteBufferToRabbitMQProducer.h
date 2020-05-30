@@ -19,6 +19,7 @@ public:
             RabbitMQHandler & eventHandler_,
             const String & routing_key_,
             const String & exchange_,
+            std::mutex & mutex_,
             Poco::Logger * log_,
             const size_t num_queues_,
             const bool bind_by_id_,
@@ -47,6 +48,7 @@ private:
     const size_t num_queues;
     size_t next_queue = 0;
     String channel_id;
+    std::mutex & mutex;
 
     Poco::Logger * log;
     const std::optional<char> delim;

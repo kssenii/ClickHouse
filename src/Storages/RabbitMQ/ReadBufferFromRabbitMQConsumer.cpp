@@ -21,7 +21,7 @@ ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
         const std::atomic<bool> & stopped_)
         : ReadBuffer(nullptr, 0)
         , evbase(event_base_new())
-        , eventHandler(evbase, log)
+        , eventHandler(evbase, log, mutex)
         , connection(&eventHandler, 
           AMQP::Address(parsed_address.first, parsed_address.second, AMQP::Login("root", "clickhouse"), "/"))
         , exchange_name(exchange_name_)

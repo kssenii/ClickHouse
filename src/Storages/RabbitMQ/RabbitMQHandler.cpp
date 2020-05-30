@@ -6,12 +6,14 @@
 namespace DB
 {
 
-RabbitMQHandler::RabbitMQHandler(event_base * evbase_, Poco::Logger * log_) :
+RabbitMQHandler::RabbitMQHandler(event_base * evbase_, Poco::Logger * log_, std::mutex & mutex_) :
     LibEventHandler(evbase_),
     evbase(evbase_),
-    log(log_)
+    log(log_),
+    mutex_ref(mutex_)
 {
 }
+
 
 void RabbitMQHandler::onError(AMQP::TcpConnection * /*connection*/, const char * message) 
 {
@@ -22,12 +24,22 @@ void RabbitMQHandler::onError(AMQP::TcpConnection * /*connection*/, const char *
 
 void RabbitMQHandler::start()
 {
+    std::lock_guard lock(mutex);
     event_base_dispatch(evbase);
 }
 
 
+void RabbitMQHandler::start_producer()
+{
+    std::lock_guard lock(mutex_ref);
+    event_base_loop(evbase, EVLOOP_NONBLOCK); 
+}
+
+
+
 void RabbitMQHandler::startNonBlock()
 {
+    std::lock_guard lock(mutex);
     event_base_loop(evbase, EVLOOP_NONBLOCK); 
 }
 

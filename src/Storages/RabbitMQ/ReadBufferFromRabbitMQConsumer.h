@@ -53,6 +53,8 @@ private:
     const bool bind_by_id;
     const bool hash_exchange;
 
+    std::mutex mutex;
+
     Poco::Logger * log;
     char row_delimiter;
     bool stalled = false;

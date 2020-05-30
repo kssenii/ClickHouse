@@ -15,6 +15,7 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
         RabbitMQHandler & eventHandler_,
         const String & routing_key_,
         const String & exchange_,
+        std::mutex & mutex_,
         Poco::Logger * log_,
         const size_t num_queues_,
         const bool bind_by_id_,
@@ -27,6 +28,7 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
         , eventHandler(eventHandler_)
         , routing_key(routing_key_)
         , exchange_name(exchange_)
+        , mutex(mutex_)
         , log(log_)
         , num_queues(num_queues_)
         , bind_by_id(bind_by_id_)
@@ -54,6 +56,7 @@ void WriteBufferToRabbitMQProducer::checkExchange()
      * bound to it, will lead to messages being routed nowhere. May be this check seems pointless, but
      * without it no publishing will happen.
      */
+    std::lock_guard lock(mutex);
     producer_channel->declareExchange(exchange_name + "_direct", AMQP::direct, AMQP::passive)
     .onSuccess([&]()
     {
@@ -98,16 +101,19 @@ void WriteBufferToRabbitMQProducer::count_row()
             /* If hash exchange is used - it distributes messages among queues based on hash of a routing key.
              * To make it unique - use current channel id.
              */
+            std::lock_guard lock(mutex);
             producer_channel->publish(exchange_name, channel_id, payload);
         }
         else if (bind_by_id)
         {
+            std::lock_guard lock(mutex);
             producer_channel->publish(exchange_name, "topic_" + std::to_string(next_queue), payload);
 
             //LOG_TRACE(log, "Producer " + channel_id + " publishes to queue " + std::to_string(next_queue));
         }
         else
         {
+            std::lock_guard lock(mutex);
             producer_channel->publish(exchange_name, routing_key, payload);
 
             //LOG_TRACE(log, "Producer " + channel_id + " publishes with key " + routing_key);
@@ -132,7 +138,7 @@ void WriteBufferToRabbitMQProducer::nextImpl()
 
 void WriteBufferToRabbitMQProducer::startNonBlockEventLoop()
 {
-    eventHandler.startNonBlock();
+    eventHandler.start_producer();
 }
 
 

@@ -17,12 +17,14 @@ namespace DB
 class RabbitMQHandler : public AMQP::LibEventHandler
 {
 public:
+    RabbitMQHandler(event_base * evbase_, Poco::Logger * log_, std::mutex & mutex_);
     RabbitMQHandler(event_base * evbase_, Poco::Logger * log_);
 
     void onError(AMQP::TcpConnection * connection, const char * message) override;
 
     void start();  /// this loop waits for active events and is stopped only after stop() method
-    void startNonBlock(); /// this loop will not wait for events to become active and quits if there are no such events
+    void start_producer();  /// this loop waits for active events and is stopped only after stop() method
+    void startNonBlock();
     void stop();
     void free();
 
@@ -30,6 +32,8 @@ private:
 
     event_base * evbase;
     bool connection_error = false;
+    std::mutex & mutex_ref;
+    std::mutex mutex;
 
     Poco::Logger * log;
     String user_name;
