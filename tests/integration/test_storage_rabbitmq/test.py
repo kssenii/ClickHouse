@@ -828,12 +828,6 @@ def test_rabbitmq_read_only_combo(rabbitmq_cluster):
     for thread in threads:
         thread.join()
 
-    for mv_id in range(NUM_MV):
-        table_name = 'view{}'.format(mv_id)
-        instance.query('''
-            DROP TABLE IF EXISTS test.{0};
-        '''.format(table_name))
-
 
     assert int(result) == messages_num * threads_num * NUM_MV, 'ClickHouse lost some messages: {}'.format(result)
 
@@ -893,7 +887,10 @@ def test_rabbitmq_insert(rabbitmq_cluster):
 @pytest.mark.timeout(240)
 def test_rabbitmq_many_inserts(rabbitmq_cluster):
     instance.query('''
-        CREATE TABLE test.rabbitmq (key UInt64, value UInt64)
+        DROP TABLE IF EXISTS test.rabbitmq_many;
+        DROP TABLE IF EXISTS test.view_many;
+        DROP TABLE IF EXISTS test.consumer_many;
+        CREATE TABLE test.rabbitmq_many (key UInt64, value UInt64)
             ENGINE = RabbitMQ
             SETTINGS rabbitmq_host_port = 'rabbitmq1:5672',
                      rabbitmq_routing_key = 'insert2',
@@ -910,7 +907,7 @@ def test_rabbitmq_many_inserts(rabbitmq_cluster):
 
         while True:
             try:
-                instance.query("INSERT INTO test.rabbitmq VALUES {}".format(values))
+                instance.query("INSERT INTO test.rabbitmq_many VALUES {}".format(values))
                 break
             except QueryRuntimeException as e:
                 if 'Local: Timed out.' in str(e):
@@ -927,24 +924,22 @@ def test_rabbitmq_many_inserts(rabbitmq_cluster):
         thread.start()
 
     instance.query('''
-        DROP TABLE IF EXISTS test.view;
-        DROP TABLE IF EXISTS test.consumer;
-        CREATE TABLE test.view (key UInt64, value UInt64)
+        CREATE TABLE test.view_many (key UInt64, value UInt64)
             ENGINE = MergeTree
             ORDER BY key;
-        CREATE MATERIALIZED VIEW test.consumer TO test.view AS
-            SELECT * FROM test.rabbitmq;
+        CREATE MATERIALIZED VIEW test.consumer_many TO test.view_many AS
+            SELECT * FROM test.rabbitmq_many;
     ''')
 
     while True:
-        result = instance.query('SELECT count() FROM test.view')
+        result = instance.query('SELECT count() FROM test.view_many')
         time.sleep(1)
         if int(result) == messages_num * threads_num:
             break
 
     instance.query('''
-        DROP TABLE test.consumer;
-        DROP TABLE test.view;
+        DROP TABLE test.consumer_many;
+        DROP TABLE test.view_many;
     ''')
 
     for thread in threads:
@@ -956,15 +951,15 @@ def test_rabbitmq_many_inserts(rabbitmq_cluster):
 @pytest.mark.timeout(240)
 def test_rabbitmq_sharding_between_channels_insert(rabbitmq_cluster):
     instance.query('''
-        CREATE TABLE test.rabbitmq (key UInt64, value UInt64)
+        CREATE TABLE test.rabbitmq_1 (key UInt64, value UInt64)
             ENGINE = RabbitMQ
             SETTINGS rabbitmq_host_port = 'rabbitmq1:5672',
-                     rabbitmq_num_consumers = 10,
+                     rabbitmq_num_consumers = 5,
                      rabbitmq_format = 'TSV',
                      rabbitmq_row_delimiter = '\\n';
     ''')
 
-    messages_num = 100000
+    messages_num = 10000
     def insert():
         values = []
         for i in range(messages_num):
@@ -973,7 +968,7 @@ def test_rabbitmq_sharding_between_channels_insert(rabbitmq_cluster):
 
         while True:
             try:
-                instance.query("INSERT INTO test.rabbitmq VALUES {}".format(values))
+                instance.query("INSERT INTO test.rabbitmq_1 VALUES {}".format(values))
                 break
             except QueryRuntimeException as e:
                 if 'Local: Timed out.' in str(e):
@@ -982,7 +977,7 @@ def test_rabbitmq_sharding_between_channels_insert(rabbitmq_cluster):
                     raise
 
     threads = []
-    threads_num = 1
+    threads_num = 20
     for _ in range(threads_num):
         threads.append(threading.Thread(target=insert))
     for thread in threads:
@@ -990,25 +985,27 @@ def test_rabbitmq_sharding_between_channels_insert(rabbitmq_cluster):
         thread.start()
 
     instance.query('''
-        DROP TABLE IF EXISTS test.view;
-        DROP TABLE IF EXISTS test.consumer;
-        CREATE TABLE test.view (key UInt64, value UInt64)
+        DROP TABLE IF EXISTS test.view_1;
+        DROP TABLE IF EXISTS test.consumer_1;
+        CREATE TABLE test.view_1 (key UInt64, value UInt64)
             ENGINE = MergeTree
             ORDER BY key;
-        CREATE MATERIALIZED VIEW test.consumer TO test.view AS
-            SELECT * FROM test.rabbitmq;
+        CREATE MATERIALIZED VIEW test.consumer_1 TO test.view_1 AS
+            SELECT * FROM test.rabbitmq_1;
     ''')
 
+    time.sleep(5);
+
     while True:
-        result = instance.query('SELECT count() FROM test.view')
+        result = instance.query('SELECT count() FROM test.view_1')
         time.sleep(1)
         print result
         if int(result) == messages_num * threads_num:
             break
 
     instance.query('''
-        DROP TABLE test.consumer;
-        DROP TABLE test.view;
+        DROP TABLE test.consumer_1;
+        DROP TABLE test.view_1;
     ''')
 
     for thread in threads:

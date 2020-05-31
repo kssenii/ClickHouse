@@ -82,9 +82,6 @@ StorageRabbitMQ::StorageRabbitMQ(
         , consumerEvbase(event_base_new())
         , consumerEventHandler(consumerEvbase, log)
         , consumerConnection(&consumerEventHandler, AMQP::Address(parsed_address.first, parsed_address.second, AMQP::Login("root", "clickhouse"), "/"))
-        , producerEvbase(event_base_new())
-        , producerEventHandler(producerEvbase, log)
-        , producerConnection(&producerEventHandler, AMQP::Address(parsed_address.first, parsed_address.second, AMQP::Login("root", "clickhouse"), "/"))
 {
     /* We make here one connection for all consumers and another connection for all producers. Having separate connections
      * for publishing and consuming is a must. It is not only recommended in general in rabbitmq, but also with the used library
@@ -139,24 +136,6 @@ Pipes StorageRabbitMQ::read(
 
 BlockOutputStreamPtr StorageRabbitMQ::write(const ASTPtr &, const Context & context)
 {
-    /// Make one connection for all publishers - they will also share one event loop.
-    if (set_producer_connection)
-    {
-        size_t cnt_retries = 0;
-        while (!producerConnection.ready() && ++cnt_retries != Connection_setup_retries_max)
-        {
-            event_base_loop(producerEvbase, EVLOOP_NONBLOCK | EVLOOP_ONCE);
-            std::this_thread::sleep_for(std::chrono::milliseconds(Connection_setup_sleep));
-        }
-
-        if (!producerConnection.ready())
-        {
-            LOG_ERROR(log, "Cannot set up consumerConnection for consumer");
-        }
-
-        set_producer_connection = false;
-    }
-
     return std::make_shared<RabbitMQBlockOutputStream>(*this, context);
 }
 
@@ -190,12 +169,6 @@ void StorageRabbitMQ::shutdown()
     }
 
     consumerConnection.close();
-
-    if (producerConnection.channels())
-    {
-        producerConnection.close();
-    }
-
     task->deactivate();
 }
 
@@ -249,7 +222,7 @@ ConsumerBufferPtr StorageRabbitMQ::createReadBuffer()
 ProducerBufferPtr StorageRabbitMQ::createWriteBuffer()
 {
     return std::make_shared<WriteBufferToRabbitMQProducer>(
-            std::make_shared<AMQP::TcpChannel>(&producerConnection), producerEventHandler, routing_key, exchange_name,
+            parsed_address, routing_key, exchange_name,
             log, num_consumers, bind_by_id, hash_exchange,
             row_delimiter ? std::optional<char>{row_delimiter} : std::nullopt, 1, 1024);
 }

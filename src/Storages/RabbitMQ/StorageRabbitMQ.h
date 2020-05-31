@@ -89,15 +89,10 @@ private:
     RabbitMQHandler consumerEventHandler;
     AMQP::TcpConnection consumerConnection;
 
-    event_base * producerEvbase;
-    RabbitMQHandler producerEventHandler;
-    AMQP::TcpConnection producerConnection;
-
     Poco::Semaphore semaphore;
     std::mutex mutex;
     std::vector<ConsumerBufferPtr> buffers; /// available buffers for RabbitMQ consumers
 
-    bool set_producer_connection = true;
     size_t next_channel_id = 1; /// Must >= 1 because it is used as a binding key, which has to be > 0
     bool update_channel_id = false;
 

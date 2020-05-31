@@ -8,15 +8,15 @@
 
 namespace DB
 {
-using ChannelPtr = std::shared_ptr<AMQP::TcpChannel>;
-using Channels = std::vector<ChannelPtr>;
+
+using ProducerPtr = std::unique_ptr<AMQP::TcpChannel>;
+using Messages = std::vector<String>;
 
 class WriteBufferToRabbitMQProducer : public WriteBuffer
 {
 public:
     WriteBufferToRabbitMQProducer(
-            ChannelPtr producer_channel_,
-            RabbitMQHandler & eventHandler_,
+            std::pair<std::string, UInt16> & parsed_address,
             const String & routing_key_,
             const String & exchange_,
             Poco::Logger * log_,
@@ -29,15 +29,14 @@ public:
     );
 
     ~WriteBufferToRabbitMQProducer() override;
+
     void count_row();
+    void flush();
 
 private:
     void nextImpl() override;
     void checkExchange();
     void startEventLoop(std::atomic<bool> & check_param);
-
-    ChannelPtr producer_channel;
-    RabbitMQHandler & eventHandler;
 
     const String routing_key;
     const String exchange_name;
@@ -45,12 +44,17 @@ private:
     const bool hash_exchange;
     const size_t num_queues;
 
-    std::atomic<bool> exchange_declared = false, exchange_error = false;
+    event_base * producerEvbase;
+    RabbitMQHandler eventHandler;
+    AMQP::TcpConnection connection;
+    ProducerPtr producer_channel;
+
     size_t next_queue = 0;
     String channel_id;
     String local_exchange;
 
-    size_t cnt_sent = 0;
+    std::atomic<size_t> cnt_sent = 0;
+    Messages messages;
 
     Poco::Logger * log;
     const std::optional<char> delim;

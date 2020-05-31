@@ -43,6 +43,7 @@ void RabbitMQBlockOutputStream::writePrefix()
 void RabbitMQBlockOutputStream::write(const Block & block)
 {
     child->write(block);
+    buffer->flush();
 }
 
 

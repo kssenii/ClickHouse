@@ -7,12 +7,19 @@
 #include <chrono>
 #include <thread>
 
+enum
+ {
+    Connection_setup_sleep = 200,
+    Connection_setup_retries_max = 1000,
+    Buffer_limit_to_flush = 100000
+ };
+
+
 namespace DB
 {
 
 WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
-        ChannelPtr producer_channel_,
-        RabbitMQHandler & eventHandler_,
+        std::pair<std::string, UInt16> & parsed_address,
         const String & routing_key_,
         const String & exchange_,
         Poco::Logger * log_,
@@ -23,8 +30,6 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
         size_t rows_per_message,
         size_t chunk_size_)
         : WriteBuffer(nullptr, 0)
-        , producer_channel(std::move(producer_channel_))
-        , eventHandler(eventHandler_)
         , routing_key(routing_key_)
         , exchange_name(exchange_)
         , log(log_)
@@ -34,40 +39,36 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
         , delim(delimiter)
         , max_rows(rows_per_message)
         , chunk_size(chunk_size_)
+        , producerEvbase(event_base_new())
+        , eventHandler(producerEvbase, log)
+        , connection(&eventHandler, AMQP::Address(parsed_address.first, parsed_address.second, AMQP::Login("root", "clickhouse"), "/"))
 {
-    channel_id = std::to_string(producer_channel->id());
-    checkExchange();
+    /* The reason behind making a separate connection for each concurrent producer is explained here:
+     * https://github.com/CopernicaMarketingSoftware/AMQP-CPP/issues/128#issuecomment-300780086
+     * - publishing with concurrent producers (as outputStreams are asynchronous) leads to internal libary errors.
+     */
+    size_t cnt_retries = 0;
+    while (!connection.ready() && ++cnt_retries != Connection_setup_retries_max)
+    {
+        event_base_loop(producerEvbase, EVLOOP_NONBLOCK | EVLOOP_ONCE);
+        std::this_thread::sleep_for(std::chrono::milliseconds(Connection_setup_sleep));
+    }
+
+    if (!connection.ready())
+    {
+        LOG_ERROR(log, "Cannot set up consumerConnection for consumer");
+    }
+
+    producer_channel = std::make_unique<AMQP::TcpChannel>(&connection);
 }
 
 
 WriteBufferToRabbitMQProducer::~WriteBufferToRabbitMQProducer()
 {
-    LOG_TRACE(log, "Producer {} send {} messages", channel_id, cnt_sent);
-    producer_channel->close();
+    flush();
+    connection.close();
 
     assert(rows == 0 && chunks.empty());
-}
-
-
-void WriteBufferToRabbitMQProducer::checkExchange()
-{
-    /* The AMQP::passive flag indicates that it should only be checked if such exchange already exists.
-     * If it doesn't - then no queue bindings happened and publishing to an exchange, without any queue
-     * bound to it, will lead to messages being routed nowhere. May be this check seems pointless, but
-     * without it no publishing will happen.
-     */
-    local_exchange = exchange_name + channel_id;
-    producer_channel->declareExchange(exchange_name, AMQP::fanout, AMQP::passive)
-    .onSuccess([&]()
-    {
-        exchange_declared = true;
-    })
-    .onError([&](const char * message)
-    {
-        exchange_error = true;
-        exchange_declared = false;
-        LOG_ERROR(log, "Exchange was not declared: {}", message);
-    });
 }
 
 
@@ -89,37 +90,59 @@ void WriteBufferToRabbitMQProducer::count_row()
 
         payload.append(last_chunk, 0, last_chunk_size);
 
-        next_queue = next_queue % num_queues + 1;
+        messages.emplace_back(payload);
 
-        ++cnt_sent;
-
-        /// it is important to make sure exchange is declared before we proceed
-        while (!exchange_declared && !exchange_error)
+        if (messages.size() >= Buffer_limit_to_flush)
         {
-            startEventLoop(exchange_declared);
-        }
-
-        if (hash_exchange)
-        {
-            /* If hash exchange is used - it distributes messages among queues based on hash of a routing key.
-             * To make it unique - use current channel id.
-             */
-            producer_channel->publish(exchange_name, channel_id, payload);
-            LOG_TRACE(log, "Producer {} send to queue {} from exchange {}", channel_id, channel_id, local_exchange);
-        }
-        else if (bind_by_id)
-        {
-            producer_channel->publish(exchange_name, std::to_string(next_queue), payload);
-            LOG_TRACE(log, "Producer {} send to queue {} from exchange {}", channel_id, next_queue, local_exchange);
-        }
-        else
-        {
-            producer_channel->publish(exchange_name, routing_key, payload);
+            flush();
         }
 
         rows = 0;
         chunks.clear();
         set(nullptr, 0);
+    }
+}
+
+
+void WriteBufferToRabbitMQProducer::flush()
+{
+    /* Why accumulating payloads and not publishing each of them at once in count_row()? Because publishing needs to 
+     * be wrapped inside declareExchange() callback and it is too expensive in terms of time to declare it each time
+     * we publish. Declaring it once and then publishing without wrapping inside onSuccess callback leads to
+     * exchange becoming inactive at some point and part of messages is lost as a result.
+     */
+    std::atomic<bool> exchange_declared = false, exchange_error = false;
+
+    producer_channel->declareExchange(exchange_name + "_direct", AMQP::direct, AMQP::passive)
+    .onSuccess([&]()
+    {
+        for (auto & payload : messages)
+        {
+            next_queue = next_queue % num_queues + 1;
+
+            if (bind_by_id || hash_exchange)
+            {
+                producer_channel->publish(exchange_name, std::to_string(next_queue), payload);
+            }
+            else
+            {
+                producer_channel->publish(exchange_name, routing_key, payload);
+            }
+        }
+
+        exchange_declared = true;
+        messages.clear();
+    })
+    .onError([&](const char * message)
+    {
+        exchange_error = true;
+        exchange_declared = false;
+        LOG_ERROR(log, "Exchange was not declared: {}", message);
+    });
+
+    while (!exchange_declared && !exchange_error)
+    {
+        startEventLoop(exchange_declared);
     }
 }
 
