@@ -10,9 +10,13 @@
 #include "Poco/Timer.h"
 #include <amqpcpp.h>
 
-
 namespace DB
 {
+
+enum
+{
+    Subscription_retries_limit = 500
+};
 
 ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
         ChannelPtr consumer_channel_,
@@ -40,6 +44,7 @@ ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
         , stopped(stopped_)
         , exchange_declared(false)
         , false_param(false)
+        , subscribed_queue(num_queues, std::make_shared<std::atomic<bool>>(new std::atomic<bool>()))
 {
     messages.clear();
     current = messages.begin();
@@ -122,6 +127,10 @@ void ReadBufferFromRabbitMQConsumer::initQueueBindings(const size_t queue_id)
     .onSuccess([&](const std::string &  queue_name_, int /* msgcount */, int /* consumercount */)
     {
         queues.emplace_back(queue_name_);
+
+        queues_id[queue_name_] = queue_id;
+        subscribed_queue[queue_id]->exchange(false);
+
         String binding_key = routing_key;
 
         /* Every consumer has at least one unique queue. Bind the queues to exchange based on the consumer_channel_id
@@ -175,34 +184,40 @@ void ReadBufferFromRabbitMQConsumer::subscribeConsumer()
     if (subscribed)
         return;
 
-    LOG_TRACE(log, "Subscribing {} to {} queues", channel_id, queues.size());
-
     for (auto & queue : queues)
     {
         subscribe(queue);
     }
 
-    subscribed = true;
+    LOG_TRACE(log, "Consumer {} is subscribed to {} queues", channel_id, count_subscribed);
+
+    if (count_subscribed == queues.size())
+        subscribed = true;
 }
 
 
 void ReadBufferFromRabbitMQConsumer::subscribe(const String & queue_name)
 {
+    if (*subscribed_queue[queues_id[queue_name]])
+        return;
+
     std::atomic<bool> consumer_created = false, consumer_failed = false;
 
     consumer_channel->consume(queue_name, AMQP::noack)
     .onSuccess([&](const std::string & /* consumer */)
     {
-        consumer_created = true;
+        subscribed_queue[queues_id[queue_name]]->exchange(true);
+        ++count_subscribed;
         LOG_TRACE(log, "Consumer {} is subscribed to queue {}", channel_id, queue_name);
 
         /* Unblock current thread if it is looping (any consumer could start the loop and only one of them) so that it does not
          * continue to execute all active callbacks on the connection (=> one looping consumer will not be blocked for too
          * long and events will be distributed between them)
          */
-        if (loop_started && ++count_subscribed == queues.size())
+        if (loop_started && count_subscribed == queues.size())
         {
             stopEventLoop();
+            subscribed = true;
         }
     })
     .onReceived([&](const AMQP::Message & message, uint64_t /* deliveryTag */, bool /* redelivered */)
@@ -246,10 +261,22 @@ void ReadBufferFromRabbitMQConsumer::subscribe(const String & queue_name)
         LOG_ERROR(log, "Consumer {} failed: {}", channel_id, message);
     });
 
+    size_t cnt_retries = 0;
+
     /// These variables are updated in a separate thread.
     while (!consumer_created && !consumer_failed)
     {
+        /// No need for sleeps as current thread either starts the loop or is blocked inside handler for 50 ms
         startEventLoop(consumer_created, loop_started);
+
+        if (++cnt_retries >= Subscription_retries_limit)
+        {
+            /* For unknown reason there is a very very rare case when subscribtion may fail and OnError callback is not activated
+             * for a long time. Subscription from current consumer is necessary and if it failes - messages will be lost.
+             */
+            LOG_ERROR(log, "Consumer {} failed to subscride to queue {}", channel_id, queue_name);
+            break;
+        }
     }
 }
 
