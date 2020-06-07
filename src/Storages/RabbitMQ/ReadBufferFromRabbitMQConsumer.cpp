@@ -43,7 +43,6 @@ ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
         , hash_exchange(hash_exchange_)
         , num_queues(num_queues_)
         , stopped(stopped_)
-        , subscribed_queue(num_queues)
 {
     messages.clear();
     current = messages.begin();
@@ -120,16 +119,12 @@ void ReadBufferFromRabbitMQConsumer::initQueueBindings(const size_t queue_id)
         exchange_declared = true;
     }
 
-    subscribed_queue[queue_id] = std::make_shared<std::atomic<bool>>(new std::atomic<bool>());
-    subscribed_queue[queue_id]->store(false);
-
     std::atomic<bool> bindings_created = false, bindings_error = false;
 
     consumer_channel->declareQueue(AMQP::exclusive)
     .onSuccess([&](const std::string &  queue_name_, int /* msgcount */, int /* consumercount */)
     {
         queues.emplace_back(queue_name_);
-        queues_id[queue_name_] = queue_id;
 
         String binding_key = routing_key;
 
@@ -210,15 +205,11 @@ void ReadBufferFromRabbitMQConsumer::subscribeConsumer()
 
 void ReadBufferFromRabbitMQConsumer::subscribe(const String & queue_name)
 {
-    if (subscribed_queue[queues_id[queue_name]]->load())
-        return;
-
-    errored = false;
+    std::atomic<bool> consumer_created = false, consumer_failed = false;
 
     consumer_channel->consume(queue_name, AMQP::noack)
     .onSuccess([&](const std::string & /* consumer */)
     {
-        subscribed_queue[queues_id[queue_name]]->store(true);
         ++count_subscribed;
 
         LOG_TRACE(log, "Consumer {} is subscribed to queue {}", channel_id, queue_name);
@@ -275,14 +266,13 @@ void ReadBufferFromRabbitMQConsumer::subscribe(const String & queue_name)
     });
 
     size_t cnt_retries = 0;
-    size_t queue_id = queues_id[queue_name];
 
     /// These variables are updated in a separate thread.
-    while (!subscribed_queue[queue_id]->load())
+    while (!consumer_created && !consumer_failed)
     {
         bool looped = startEventLoop(loop_started);
 
-        if (!subscribed_queue[queue_id]->load())
+        if (!consumer_created && !consumer_failed)
         {
             if (cnt_retries >= Loop_retries_limit || errored)
             {
@@ -294,11 +284,8 @@ void ReadBufferFromRabbitMQConsumer::subscribe(const String & queue_name)
             }
 
             /// Do not sleep if event loop was started from current thread, otherwise multiple MV would not work
-            if (!looped)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(Loop_wait_sleep));
-                ++cnt_retries;
-            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(Loop_wait_sleep));
+            ++cnt_retries;
         }
     }
 }

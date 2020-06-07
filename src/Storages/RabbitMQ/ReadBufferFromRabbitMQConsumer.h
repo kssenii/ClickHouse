@@ -73,7 +73,7 @@ private:
     Messages received;
     Messages messages;
     Messages::iterator current;
-    std::vector<std::shared_ptr<std::atomic<bool>>> subscribed_queue;
+    std::vector<bool> subscribed_queue;
     std::unordered_map<String, size_t> queues_id;
 
     std::mutex mutex;
