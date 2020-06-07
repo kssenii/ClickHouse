@@ -58,18 +58,16 @@ private:
     bool allowed = true;
     const std::atomic<bool> & stopped;
 
+    String current_exchange_name;
+
     /* Note: as all concurrent consumers share the same connection => they also share the same
      * event loop, which can be started by any consumer and the loop is blocking only to the thread that
-     * started it, and the loop executes ALL active callbacks on the connection => in case
-     * num_consumers > 1, at most two threads will be present: main thread and the one
-     * that executes callbacks (1 thread if main thread is the one that started the loop).
+     * started it, and the loop executes ALL active callbacks on the connection => in case num_consumers > 1,
+     * at most two threads will be present: main thread and the one that executes callbacks (1 thread if
+     * main thread is the one that started the loop). Both reference these variables.
      */
-    std::atomic<bool> exchange_declared;
-    std::atomic<bool> false_param;
-    std::atomic<bool> subscribed = false;
+    std::atomic<bool> exchange_declared = false, subscribed = false, loop_started = false, errored = false;
     std::atomic<size_t> count_subscribed = 0;
-    std::atomic<bool> loop_started;
-    String current_exchange_name;
 
     std::vector<String> queues;
     Messages received;
@@ -85,7 +83,7 @@ private:
     void initExchange();
     void initQueueBindings(const size_t queue_id);
     void subscribe(const String & queue_name);
-    void startEventLoop(std::atomic<bool> & check_param, std::atomic<bool> & loop_started);
+    bool startEventLoop(std::atomic<bool> & loop_started);
     void stopEventLoopWithTimeout();
     void stopEventLoop();
 
