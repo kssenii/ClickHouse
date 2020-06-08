@@ -66,15 +66,15 @@ private:
      * at most two threads will be present: main thread and the one that executes callbacks (1 thread if
      * main thread is the one that started the loop). Both reference these variables.
      */
-    std::atomic<bool> exchange_declared = false, subscribed = false, loop_started = false, errored = false;
+    std::atomic<bool> exchange_declared = false, subscribed = false, loop_started = false, false_param = false;
+    std::atomic<bool> consumer_created = false, consumer_failed = false;
     std::atomic<size_t> count_subscribed = 0;
 
     std::vector<String> queues;
     Messages received;
     Messages messages;
     Messages::iterator current;
-    std::vector<bool> subscribed_queue;
-    std::unordered_map<String, size_t> queues_id;
+    std::unordered_map<String, bool> subscribed_queue;
 
     std::mutex mutex;
 
@@ -83,7 +83,7 @@ private:
     void initExchange();
     void initQueueBindings(const size_t queue_id);
     void subscribe(const String & queue_name);
-    bool startEventLoop(std::atomic<bool> & loop_started);
+    void startEventLoop(std::atomic<bool> & check_param, std::atomic<bool> & loop_started);
     void stopEventLoopWithTimeout();
     void stopEventLoop();
 
