@@ -147,7 +147,12 @@ def test_rabbitmq_select_from_new_syntax_table(rabbitmq_cluster):
 
     connection.close()
 
-    result = instance.query('SELECT * FROM test.rabbitmq', ignore_error=True)
+    result = ''
+    while True:
+        result += instance.query('SELECT * FROM test.rabbitmq', ignore_error=True)
+        if rabbitmq_check_result(result):
+            break
+
     rabbitmq_check_result(result, True)
 
 
@@ -173,7 +178,12 @@ def test_rabbitmq_select_from_old_syntax_table(rabbitmq_cluster):
 
     connection.close()
 
-    result = instance.query('SELECT * FROM test.rabbitmq', ignore_error=True)
+    result = ''
+    while True:
+        result += instance.query('SELECT * FROM test.rabbitmq', ignore_error=True)
+        if rabbitmq_check_result(result):
+            break
+
     rabbitmq_check_result(result, True)
 
 
