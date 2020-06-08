@@ -35,12 +35,13 @@ public:
     ~WriteBufferToRabbitMQProducer() override;
 
     void countRow();
-    void flush();
+    void startEventLoop();
 
 private:
     void nextImpl() override;
+
     void checkExchange();
-    void startEventLoop();
+    void producerSetUp();
 
     std::pair<String, String> & login_password;
     const String routing_key;
@@ -48,6 +49,7 @@ private:
     const bool bind_by_id;
     const bool hash_exchange;
     const size_t num_queues;
+    Poco::Logger * log;
 
     event_base * producerEvbase;
     RabbitMQHandler eventHandler;
@@ -55,12 +57,11 @@ private:
     ProducerPtr producer_channel;
 
     size_t next_queue = 0;
-    UInt64 message_counter = 0;
-    String channel_id;
+    std::atomic<bool> confirm_mode_set = false, exchange_declared = false, exchange_error = false;
+    std::atomic<size_t> published = 0, message_counter = 0;
 
     Messages messages;
 
-    Poco::Logger * log;
     const std::optional<char> delim;
     const size_t max_rows;
     const size_t chunk_size;

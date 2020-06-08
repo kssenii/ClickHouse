@@ -45,7 +45,7 @@ void RabbitMQBlockOutputStream::write(const Block & block)
     child->write(block);
 
     if (buffer)
-        buffer->flush();
+        buffer->startEventLoop();
 
     storage.pingConnection();
 }

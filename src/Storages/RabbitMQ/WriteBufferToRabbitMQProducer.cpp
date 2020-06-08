@@ -16,7 +16,9 @@ enum
 {
     Connection_setup_sleep = 200,
     Connection_setup_retries_max = 1000,
-    Buffer_limit_to_flush = 10000 /// It is important to keep it low in order not to kill consumers
+    Buffer_limit_to_flush = 10000,
+    Loop_retries_limit = 500,
+    Loop_wait_sleep = 20
 };
 
 WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
@@ -64,12 +66,35 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
     }
 
     producer_channel = std::make_shared<AMQP::TcpChannel>(&connection);
+    checkExchange();
+
+    producer_channel->confirmSelect().onSuccess([&]()
+    {
+        confirm_mode_set = true;
+    })
+    .onAck([&](int64_t /* deliverTag */, bool /* multiple */)
+    {
+        ++published;
+    })
+    .onNack([&](uint64_t /* deliveryTag */, bool /* multiple */, bool /* requeue */)
+    {
+        --message_counter;
+        /// A case that should not normally happen at all. (It is not advised to republish in this case)
+        LOG_ERROR(log, "Broker denied message publication.");
+    });
+
+    producerSetUp();
 }
 
 
 WriteBufferToRabbitMQProducer::~WriteBufferToRabbitMQProducer()
 {
-    flush();
+    while (published != message_counter)
+    {
+        startEventLoop();
+    }
+
+    producer_channel->close();
     connection.close();
 
     assert(rows == 0 && chunks.empty());
@@ -98,62 +123,57 @@ void WriteBufferToRabbitMQProducer::countRow()
         chunks.clear();
         set(nullptr, 0);
 
-        messages.emplace_back(payload);
-        ++message_counter;
+        next_queue = next_queue % num_queues + 1;
 
-        if (messages.size() >= Buffer_limit_to_flush)
+        if (bind_by_id || hash_exchange)
         {
-            flush();
+            producer_channel->publish(exchange_name, std::to_string(next_queue), payload);
         }
+        else
+        {
+            producer_channel->publish(exchange_name, routing_key, payload);
+        }
+
+        ++message_counter;
     }
 }
 
-
-void WriteBufferToRabbitMQProducer::flush()
+void WriteBufferToRabbitMQProducer::checkExchange()
 {
-    std::atomic<bool> exchange_declared = false, exchange_error = false;
-
     /* The AMQP::passive flag indicates that it should only be checked if there is a valid exchange with the given name
-     * and makes it visible from current producer_channel.
+     * and makes it initialized on the current channel.
      */
-    producer_channel->declareExchange(exchange_name + "_direct", AMQP::direct, AMQP::passive)
+    producer_channel->declareExchange(exchange_name, AMQP::fanout, AMQP::passive)
     .onSuccess([&]()
     {
         exchange_declared = true;
-
-        /* The reason for accumulating payloads and not publishing each of them at once in count_row() is that publishing
-         * needs to be wrapped inside declareExchange() callback and it is too expensive in terms of time to declare it
-         * each time we publish. Declaring it once and then publishing without wrapping inside onSuccess callback leads to
-         * exchange becoming inactive at some point and part of messages is lost as a result.
-         */
-        for (auto & payload : messages)
-        {
-            if (!message_counter)
-                break;
-
-            next_queue = next_queue % num_queues + 1;
-
-            if (bind_by_id || hash_exchange)
-            {
-                producer_channel->publish(exchange_name, std::to_string(next_queue), payload);
-            }
-            else
-            {
-                producer_channel->publish(exchange_name, routing_key, payload);
-            }
-
-            --message_counter;
-        }
-
-        messages.clear();
     })
     .onError([&](const char * message)
     {
         exchange_error = true;
         LOG_ERROR(log, "Exchange was not declared: {}", message);
     });
+}
 
-    /// These variables are updated in a separate thread and starting the loop blocks current thread
+
+void WriteBufferToRabbitMQProducer::producerSetUp()
+{
+    size_t cnt_retries = 0;
+
+    /// Cannot publish before producers confirm mode is not set up
+    while (!confirm_mode_set && ++cnt_retries <= Loop_retries_limit)
+    {
+        startEventLoop();
+
+        if (!confirm_mode_set)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(Loop_wait_sleep));
+        }
+    }
+
+    /* Exchange also needs to be initialized before publishing (should already be initialized in a previous
+     * loop, but check anyway.
+     */
     while (!exchange_declared && !exchange_error)
     {
         startEventLoop();
