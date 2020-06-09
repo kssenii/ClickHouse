@@ -15,10 +15,10 @@ namespace DB
 enum
 {
     Connection_setup_sleep = 200,
-    Connection_setup_retries_max = 1000,
     Buffer_limit_to_flush = 10000,
-    Loop_retries_limit = 500,
-    Loop_wait_sleep = 20
+    Loop_retries_limit = 1000,
+    Loop_wait_sleep = 10,
+    batch = 10000
 };
 
 WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
@@ -54,7 +54,7 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
      * different threads (as outputStreams are asynchronous) with the same connection leads to internal library errors.
      */
     size_t cnt_retries = 0;
-    while (!connection.ready() && ++cnt_retries != Connection_setup_retries_max)
+    while (!connection.ready() && ++cnt_retries != Loop_retries_limit)
     {
         event_base_loop(producerEvbase, EVLOOP_NONBLOCK | EVLOOP_ONCE);
         std::this_thread::sleep_for(std::chrono::milliseconds(Connection_setup_sleep));
@@ -78,7 +78,6 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
     })
     .onNack([&](uint64_t /* deliveryTag */, bool /* multiple */, bool /* requeue */)
     {
-        --message_counter;
         /// A case that should not normally happen at all. (It is not advised to republish in this case)
         LOG_ERROR(log, "Broker denied message publication.");
     });
@@ -89,10 +88,7 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
 
 WriteBufferToRabbitMQProducer::~WriteBufferToRabbitMQProducer()
 {
-    while (published != message_counter)
-    {
-        startEventLoop();
-    }
+    proccessBatch();
 
     producer_channel->close();
     connection.close();
@@ -135,6 +131,11 @@ void WriteBufferToRabbitMQProducer::countRow()
         }
 
         ++message_counter;
+
+        if (message_counter % batch == 0)
+        {
+            proccessBatch();
+        }
     }
 }
 
@@ -175,6 +176,15 @@ void WriteBufferToRabbitMQProducer::producerSetUp()
      * loop, but check anyway.
      */
     while (!exchange_declared && !exchange_error)
+    {
+        startEventLoop();
+    }
+}
+
+
+void WriteBufferToRabbitMQProducer::proccessBatch()
+{
+    while (published < message_counter)
     {
         startEventLoop();
     }

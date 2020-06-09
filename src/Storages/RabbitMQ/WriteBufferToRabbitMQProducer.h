@@ -42,6 +42,7 @@ private:
 
     void checkExchange();
     void producerSetUp();
+    void proccessBatch();
 
     std::pair<String, String> & login_password;
     const String routing_key;
