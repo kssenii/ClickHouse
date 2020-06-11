@@ -521,7 +521,7 @@ def test_rabbitmq_sharding_between_channels_publish(rabbitmq_cluster):
     time.sleep(1)
 
     i = [0]
-    messages_num = 10000
+    messages_num = 1000
 
     credentials = pika.PlainCredentials('root', 'clickhouse')
     parameters = pika.ConnectionParameters('localhost', 5672, '/', credentials)
@@ -551,6 +551,7 @@ def test_rabbitmq_sharding_between_channels_publish(rabbitmq_cluster):
     while True:
         result = instance.query('SELECT count() FROM test.view')
         time.sleep(1)
+        print result
         if int(result) == messages_num * threads_num:
             break
 
@@ -584,7 +585,7 @@ def test_rabbitmq_sharding_between_queues_publish(rabbitmq_cluster):
     time.sleep(1)
 
     i = [0]
-    messages_num = 10000
+    messages_num = 1000
 
     credentials = pika.PlainCredentials('root', 'clickhouse')
     parameters = pika.ConnectionParameters('localhost', 5672, '/', credentials)
@@ -649,7 +650,7 @@ def test_rabbitmq_sharding_between_channels_and_queues_publish(rabbitmq_cluster)
     time.sleep(1)
 
     i = [0]
-    messages_num = 10000
+    messages_num = 1000
 
     credentials = pika.PlainCredentials('root', 'clickhouse')
     parameters = pika.ConnectionParameters('localhost', 5672, '/', credentials)
@@ -720,7 +721,7 @@ def test_rabbitmq_read_only_combo(rabbitmq_cluster):
     time.sleep(2)
 
     i = [0]
-    messages_num = 10000
+    messages_num = 1000
 
     credentials = pika.PlainCredentials('root', 'clickhouse')
     parameters = pika.ConnectionParameters('localhost', 5672, '/', credentials)
@@ -751,6 +752,7 @@ def test_rabbitmq_read_only_combo(rabbitmq_cluster):
         result = 0
         for view in range(NUM_MV):
             result += int(instance.query('SELECT count() FROM test.view{0}'.format(view)))
+        print result
         if int(result) == messages_num * threads_num * NUM_MV:
             break
         time.sleep(1)
@@ -927,6 +929,7 @@ def test_rabbitmq_sharding_between_channels_insert(rabbitmq_cluster):
     while True:
         result = instance.query('SELECT count() FROM test.view_sharding')
         time.sleep(1)
+        print result
         if int(result) == messages_num * threads_num:
             break
 

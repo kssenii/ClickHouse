@@ -46,7 +46,7 @@ private:
     const bool bind_by_id;
     const size_t num_queues;
 
-    event_base * producerEvbase;
+    uv_loop_t * loop;
     RabbitMQHandler eventHandler;
     AMQP::TcpConnection connection;
     ProducerPtr producer_channel;

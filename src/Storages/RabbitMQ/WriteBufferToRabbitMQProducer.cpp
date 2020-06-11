@@ -7,7 +7,8 @@
 #include <chrono>
 #include <thread>
 #include <atomic>
-
+#include <amqpcpp/libuv.h>
+#include <uv.h>
 
 namespace DB
 {
@@ -40,8 +41,8 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
         , delim(delimiter)
         , max_rows(rows_per_message)
         , chunk_size(chunk_size_)
-        , producerEvbase(event_base_new())
-        , eventHandler(producerEvbase, log)
+        , loop(uv_default_loop())
+        , eventHandler(loop, log)
         , connection(&eventHandler, AMQP::Address(parsed_address.first, parsed_address.second,
                     AMQP::Login(login_password.first, login_password.second), "/"))
 {
@@ -52,7 +53,7 @@ WriteBufferToRabbitMQProducer::WriteBufferToRabbitMQProducer(
     size_t cnt_retries = 0;
     while (!connection.ready() && ++cnt_retries != Connection_setup_retries_max)
     {
-        event_base_loop(producerEvbase, EVLOOP_NONBLOCK | EVLOOP_ONCE);
+        uv_run(loop, UV_RUN_NOWAIT);
         std::this_thread::sleep_for(std::chrono::milliseconds(Connection_setup_sleep));
     }
 
@@ -70,6 +71,7 @@ WriteBufferToRabbitMQProducer::~WriteBufferToRabbitMQProducer()
 {
     checkExchange();
     connection.close();
+    eventHandler.stop();
 
     assert(rows == 0 && chunks.empty());
 }

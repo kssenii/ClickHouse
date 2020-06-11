@@ -309,7 +309,7 @@ void ReadBufferFromRabbitMQConsumer::subscribe(const String & queue_name)
 
             if (stop_loop)
             {
-                stopEventLoopWithTimeout();
+                //stopEventLoopWithTimeout();
             }
         }
     })

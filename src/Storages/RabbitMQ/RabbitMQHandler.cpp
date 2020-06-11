@@ -11,9 +11,9 @@ enum
 };
 
 
-RabbitMQHandler::RabbitMQHandler(event_base * evbase_, Poco::Logger * log_) :
-    LibEventHandler(evbase_),
-    evbase(evbase_),
+RabbitMQHandler::RabbitMQHandler(uv_loop_t * loop_, Poco::Logger * log_) :
+    AMQP::LibUvHandler(loop_),
+    loop(loop_),
     log(log_)
 {
     tv.tv_sec = 0;
@@ -37,12 +37,12 @@ void RabbitMQHandler::onError(AMQP::TcpConnection * connection, const char * mes
 void RabbitMQHandler::startConsumerLoop(std::atomic<bool> & loop_started)
 {
     /* The object of this class is shared between concurrent consumers (who share the same connection == share the same
-     * event loop). But the loop should not be attempted to start if it is already running. 
+     * event loop). But the loop should not be attempted to start if it is already running.
      */
     if (mutex_before_event_loop.try_lock_for(std::chrono::milliseconds(Lock_timeout)))
     {
         loop_started = true;
-        event_base_loop(evbase, EVLOOP_NONBLOCK);
+        uv_run(loop, UV_RUN_NOWAIT);
         mutex_before_event_loop.unlock();
     }
 }
@@ -50,7 +50,7 @@ void RabbitMQHandler::startConsumerLoop(std::atomic<bool> & loop_started)
 
 void RabbitMQHandler::startProducerLoop()
 {
-    event_base_loop(evbase, EVLOOP_NONBLOCK);
+    uv_run(loop, UV_RUN_NOWAIT);
 }
 
 
@@ -58,7 +58,7 @@ void RabbitMQHandler::stop()
 {
     if (mutex_before_loop_stop.try_lock_for(std::chrono::milliseconds(0)))
     {
-        event_base_loopbreak(evbase);
+        uv_stop(loop);
         mutex_before_loop_stop.unlock();
     }
 }
@@ -68,7 +68,7 @@ void RabbitMQHandler::stopWithTimeout()
 {
     if (mutex_before_loop_stop.try_lock_for(std::chrono::milliseconds(0)))
     {
-        event_base_loopexit(evbase, &tv);
+        uv_stop(loop);
         mutex_before_loop_stop.unlock();
     }
 }

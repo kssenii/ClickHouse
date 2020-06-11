@@ -78,15 +78,15 @@ StorageRabbitMQ::StorageRabbitMQ(
                     rabbitmq_context.getConfigRef().getString("rabbitmq_username", "root"),
                     rabbitmq_context.getConfigRef().getString("rabbitmq_password", "clickhouse")))
         , parsed_address(parseAddress(global_context.getMacros()->expand(host_port_), 5672))
-        , evbase(event_base_new())
-        , eventHandler(evbase, log)
+        , loop(uv_default_loop())
+        , eventHandler(loop, log)
         , connection(&eventHandler, AMQP::Address(parsed_address.first, parsed_address.second,
                     AMQP::Login(login_password.first, login_password.second), "/"))
 {
     size_t cnt_retries = 0;
     while (!connection.ready() && ++cnt_retries != Connection_setup_retries_max)
     {
-        event_base_loop(evbase, EVLOOP_NONBLOCK | EVLOOP_ONCE);
+        uv_run(loop, UV_RUN_NOWAIT);
         std::this_thread::sleep_for(std::chrono::milliseconds(Connection_setup_sleep));
     }
 

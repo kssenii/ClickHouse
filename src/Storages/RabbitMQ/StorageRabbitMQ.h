@@ -9,8 +9,8 @@
 #include <atomic>
 #include <Storages/RabbitMQ/Buffer_fwd.h>
 #include <Storages/RabbitMQ/RabbitMQHandler.h>
-#include <event2/event.h>
-
+#include <amqpcpp/libuv.h>
+#include <uv.h>
 
 namespace DB
 {
@@ -86,7 +86,7 @@ private:
     std::pair<String, UInt16> parsed_address;
     std::pair<String, String> login_password;
 
-    event_base * evbase;
+    uv_loop_t * loop;
     RabbitMQHandler eventHandler;
     AMQP::TcpConnection connection; /// Connection for all consumers
 
