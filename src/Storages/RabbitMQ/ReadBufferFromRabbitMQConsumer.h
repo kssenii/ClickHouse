@@ -5,6 +5,7 @@
 #include <IO/ReadBuffer.h>
 #include <amqpcpp.h>
 #include <Storages/RabbitMQ/RabbitMQHandler.h>
+#include <Core/BackgroundSchedulePool.h>
 #include <event2/event.h>
 
 namespace Poco
@@ -16,14 +17,16 @@ namespace DB
 {
 
 using ChannelPtr = std::shared_ptr<AMQP::TcpChannel>;
+using HandlerPtr = std::shared_ptr<RabbitMQHandler>;
 
 class ReadBufferFromRabbitMQConsumer : public ReadBuffer
 {
 
 public:
     ReadBufferFromRabbitMQConsumer(
+            BackgroundSchedulePool::TaskHolder & looping_task_,
             ChannelPtr consumer_channel_,
-            RabbitMQHandler & event_handler_,
+            HandlerPtr event_handler_,
             const String & exchange_name_,
             const Names & routing_keys_,
             const size_t channel_id_,
@@ -46,7 +49,7 @@ private:
     using Messages = std::vector<String>;
 
     ChannelPtr consumer_channel;
-    RabbitMQHandler & event_handler;
+    HandlerPtr event_handler;
 
     const String & exchange_name;
     const Names & routing_keys;
@@ -64,6 +67,8 @@ private:
     bool stalled = false;
     bool allowed = true;
     const std::atomic<bool> & stopped;
+
+    BackgroundSchedulePool::TaskHolder & looping_task;
 
     String default_local_exchange;
     bool local_exchange_declared = false, local_hash_exchange_declared = false;
@@ -92,7 +97,6 @@ private:
     void initQueueBindings(const size_t queue_id);
     void subscribe(const String & queue_name);
     void startEventLoop(std::atomic<bool> & loop_started);
-    void stopEventLoopWithTimeout();
     void stopEventLoop();
 
 };
