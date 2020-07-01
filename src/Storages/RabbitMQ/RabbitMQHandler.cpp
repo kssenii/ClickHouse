@@ -10,9 +10,6 @@ namespace ErrorCodes
     extern const int CANNOT_CONNECT_RABBITMQ;
 }
 
-/* The object of this class is shared between concurrent consumers (who share the same connection == share the same
- * event loop and handler).
- */
 RabbitMQHandler::RabbitMQHandler(uv_loop_t * loop_, Poco::Logger * log_) :
     AMQP::LibUvHandler(loop_),
     loop(loop_),
@@ -44,11 +41,7 @@ void RabbitMQHandler::startBackgroundLoop()
 
 void RabbitMQHandler::startLoop()
 {
-    if (starting_loop.try_lock())
-    {
-        uv_run(loop, UV_RUN_NOWAIT);
-        starting_loop.unlock();
-    }
+    uv_run(loop, UV_RUN_NOWAIT);
 }
 
 }

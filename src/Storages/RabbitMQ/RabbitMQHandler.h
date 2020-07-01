@@ -27,7 +27,6 @@ private:
     Poco::Logger * log;
 
     std::atomic<bool> stop_loop = false;
-    std::timed_mutex starting_loop;
 };
 
 }

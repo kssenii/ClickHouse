@@ -37,10 +37,6 @@
 namespace DB
 {
 
-static const auto CONNECT_SLEEP = 200;
-static const auto RETRIES_MAX = 1000;
-static const auto RESCHEDULE_MS = 500;
-
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
@@ -80,22 +76,6 @@ StorageRabbitMQ::StorageRabbitMQ(
                     global_context.getConfigRef().getString("rabbitmq_password", "clickhouse")))
         , parsed_address(parseAddress(global_context.getMacros()->expand(host_port_), 5672))
 {
-    loop = std::make_unique<uv_loop_t>();
-    uv_loop_init(loop.get());
-
-    event_handler = std::make_shared<RabbitMQHandler>(loop.get(), log);
-    connection = std::make_shared<AMQP::TcpConnection>(event_handler.get(), AMQP::Address(parsed_address.first, parsed_address.second, AMQP::Login(login_password.first, login_password.second), "/"));
-
-    size_t cnt_retries = 0;
-    while (!connection->ready() && ++cnt_retries != RETRIES_MAX)
-    {
-        uv_run(loop.get(), UV_RUN_NOWAIT);
-        std::this_thread::sleep_for(std::chrono::milliseconds(CONNECT_SLEEP));
-    }
-
-    if (!connection->ready())
-        throw Exception("Cannot set up connection for consumers", ErrorCodes::CANNOT_CONNECT_RABBITMQ);
-
     rabbitmq_context.makeQueryContext();
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
@@ -103,8 +83,6 @@ StorageRabbitMQ::StorageRabbitMQ(
 
     streaming_task = global_context.getSchedulePool().createTask("RabbitMQStreamingTask", [this]{ threadFunc(); });
     streaming_task->deactivate();
-    heartbeat_task = global_context.getSchedulePool().createTask("RabbitMQHeartbeatTask", [this]{ heartbeatFunc(); });
-    heartbeat_task->deactivate();
 
     bind_by_id = num_consumers > 1 || num_queues > 1;
 
@@ -113,28 +91,6 @@ StorageRabbitMQ::StorageRabbitMQ(
 
     /// Make sure that local exchange name is unique for each table and is not the same as client's exchange name
     local_exchange_name = exchange_name + "_" + table_name;
-
-    /// One looping task for all consumers as they share the same connection == the same handler == the same event loop
-    looping_task = global_context.getSchedulePool().createTask("RabbitMQLoopingTask", [this]{ loopingFunc(); });
-    looping_task->deactivate();
-}
-
-
-void StorageRabbitMQ::heartbeatFunc()
-{
-    if (!stream_cancelled)
-    {
-        LOG_DEBUG(log, "Sending RabbitMQ heartbeat");
-        connection->heartbeat();
-        heartbeat_task->scheduleAfter(RESCHEDULE_MS * 10);
-    }
-}
-
-
-void StorageRabbitMQ::loopingFunc()
-{
-    LOG_DEBUG(log, "Starting event looping iterations");
-    event_handler->startBackgroundLoop();
 }
 
 
@@ -158,12 +114,6 @@ Pipes StorageRabbitMQ::read(
         pipes.emplace_back(
             std::make_shared<SourceFromInputStream>(std::make_shared<RabbitMQBlockInputStream>(
                     *this, metadata_snapshot, context, column_names, log)));
-    }
-
-    if (!loop_started)
-    {
-        loop_started = true;
-        looping_task->activateAndSchedule();
     }
 
     LOG_DEBUG(log, "Starting reading {} streams", pipes.size());
@@ -194,7 +144,6 @@ void StorageRabbitMQ::startup()
     }
 
     streaming_task->activateAndSchedule();
-    heartbeat_task->activateAndSchedule();
 }
 
 
@@ -208,12 +157,6 @@ void StorageRabbitMQ::shutdown()
     }
 
     streaming_task->deactivate();
-    heartbeat_task->deactivate();
-
-    event_handler->stop();
-    looping_task->deactivate();
-
-    connection->close();
 }
 
 
@@ -257,10 +200,8 @@ ConsumerBufferPtr StorageRabbitMQ::createReadBuffer()
         next_channel_id += num_queues;
     update_channel_id = true;
 
-    ChannelPtr consumer_channel = std::make_shared<AMQP::TcpChannel>(connection.get());
-
     return std::make_shared<ReadBufferFromRabbitMQConsumer>(
-        consumer_channel, event_handler, exchange_name, routing_keys,
+        parsed_address, global_context, login_password, exchange_name, routing_keys,
         next_channel_id, log, row_delimiter, bind_by_id, num_queues,
         exchange_type, local_exchange_name, stream_cancelled);
 }
@@ -366,12 +307,6 @@ bool StorageRabbitMQ::streamToViews()
         limits.speed_limits.max_execution_time = settings.stream_flush_interval_ms;
         limits.timeout_overflow_mode = OverflowMode::BREAK;
         stream->setLimits(limits);
-    }
-
-    if (!loop_started)
-    {
-        loop_started = true;
-        looping_task->activateAndSchedule();
     }
 
     // Join multiple streams if necessary

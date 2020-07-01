@@ -17,7 +17,12 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
+    extern const int CANNOT_CONNECT_RABBITMQ;
 }
+
+static const auto CONNECT_SLEEP = 200;
+static const auto RETRIES_MAX = 1000;
+static const auto RESCHEDULE_MS = 500;
 
 namespace ExchangeType
 {
@@ -33,8 +38,9 @@ namespace ExchangeType
 static const auto QUEUE_SIZE = 50000; /// Equals capacity of a single rabbitmq queue
 
 ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
-        ChannelPtr consumer_channel_,
-        HandlerPtr event_handler_,
+        std::pair<String, UInt16> & parsed_address,
+        Context & global_context,
+        std::pair<String, String> & login_password,
         const String & exchange_name_,
         const Names & routing_keys_,
         const size_t channel_id_,
@@ -46,8 +52,6 @@ ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
         const String & local_exchange_,
         const std::atomic<bool> & stopped_)
         : ReadBuffer(nullptr, 0)
-        , consumer_channel(std::move(consumer_channel_))
-        , event_handler(event_handler_)
         , exchange_name(exchange_name_)
         , routing_keys(routing_keys_)
         , channel_id(channel_id_)
@@ -62,6 +66,25 @@ ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
         , stopped(stopped_)
         , messages(QUEUE_SIZE * num_queues)
 {
+    loop = std::make_unique<uv_loop_t>();
+    uv_loop_init(loop.get());
+
+    event_handler = std::make_unique<RabbitMQHandler>(loop.get(), log);
+    connection = std::make_unique<AMQP::TcpConnection>(event_handler.get(), AMQP::Address(parsed_address.first, parsed_address.second, AMQP::Login(login_password.first, login_password.second), "/"));
+
+    size_t cnt_retries = 0;
+    while (!connection->ready() && ++cnt_retries != RETRIES_MAX)
+    {
+        uv_run(loop.get(), UV_RUN_NOWAIT);
+        std::this_thread::sleep_for(std::chrono::milliseconds(CONNECT_SLEEP));
+    }
+
+    if (!connection->ready())
+    {
+        throw Exception("Cannot set up connection for consumer", ErrorCodes::CANNOT_CONNECT_RABBITMQ);
+    }
+
+    consumer_channel = std::make_shared<AMQP::TcpChannel>(connection.get());
     exchange_type_set = exchange_type != ExchangeType::DEFAULT;
 
     /* One queue per consumer can handle up to 50000 messages. More queues per consumer can be added.
@@ -72,15 +95,51 @@ ReadBufferFromRabbitMQConsumer::ReadBufferFromRabbitMQConsumer(
         /// Queue bingings must be declared before any publishing => it must be done here and not in readPrefix()
         initQueueBindings(queue_id);
     }
+
+    heartbeat_task = global_context.getSchedulePool().createTask("RabbitMQHeartbeatTask", [this]{ heartbeatFunc(); });
+    heartbeat_task->activateAndSchedule();
+
+    looping_task = global_context.getSchedulePool().createTask("RabbitMQLoopingTask" + std::to_string(channel_id), [this]{ loopingFunc(); });
+    looping_task->activateAndSchedule();
 }
 
 
 ReadBufferFromRabbitMQConsumer::~ReadBufferFromRabbitMQConsumer()
 {
-    consumer_channel->close();
+    heartbeat_task->deactivate();
+
+    event_handler->stop();
+    looping_task->deactivate();
+
+    connection->close();
 
     messages.clear();
     BufferBase::set(nullptr, 0, 0);
+}
+
+
+void ReadBufferFromRabbitMQConsumer::heartbeatFunc()
+{
+    LOG_DEBUG(log, "Sending RabbitMQ heartbeat");
+    connection->heartbeat();
+    heartbeat_task->scheduleAfter(RESCHEDULE_MS * 10);
+}
+
+
+void ReadBufferFromRabbitMQConsumer::loopingFunc()
+{
+    LOG_DEBUG(log, "Starting event looping iterations");
+    event_handler->startBackgroundLoop();
+}
+
+
+void ReadBufferFromRabbitMQConsumer::activateReading()
+{
+    if (!loop_started)
+    {
+        loop_started = true;
+        looping_task->activateAndSchedule();
+    }
 }
 
 

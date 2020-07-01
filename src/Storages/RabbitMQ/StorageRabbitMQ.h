@@ -91,10 +91,6 @@ private:
     std::pair<String, UInt16> parsed_address;
     std::pair<String, String> login_password;
 
-    std::shared_ptr<uv_loop_t> loop;
-    std::shared_ptr<RabbitMQHandler> event_handler;
-    std::shared_ptr<AMQP::TcpConnection> connection; /// Connection for all consumers
-
     Poco::Semaphore semaphore;
     std::mutex mutex;
     std::vector<ConsumerBufferPtr> buffers; /// available buffers for RabbitMQ consumers
@@ -104,8 +100,6 @@ private:
     std::atomic<bool> loop_started = false;
 
     BackgroundSchedulePool::TaskHolder streaming_task;
-    BackgroundSchedulePool::TaskHolder heartbeat_task;
-    BackgroundSchedulePool::TaskHolder looping_task;
 
     std::atomic<bool> stream_cancelled{false};
 
@@ -115,7 +109,6 @@ private:
     void heartbeatFunc();
     void loopingFunc();
 
-    void pingConnection() { connection->heartbeat(); }
     bool streamToViews();
     bool checkDependencies(const StorageID & table_id);
 };

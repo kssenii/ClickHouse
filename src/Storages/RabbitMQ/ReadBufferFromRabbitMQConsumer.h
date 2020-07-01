@@ -5,7 +5,9 @@
 #include <IO/ReadBuffer.h>
 #include <amqpcpp.h>
 #include <Storages/RabbitMQ/RabbitMQHandler.h>
+#include <Core/BackgroundSchedulePool.h>
 #include <Common/ConcurrentBoundedQueue.h>
+#include <Interpreters/Context.h>
 
 namespace Poco
 {
@@ -23,8 +25,9 @@ class ReadBufferFromRabbitMQConsumer : public ReadBuffer
 
 public:
     ReadBufferFromRabbitMQConsumer(
-            ChannelPtr consumer_channel_,
-            HandlerPtr event_handler_,
+            std::pair<String, UInt16> & parsed_address,
+            Context & global_context,
+            std::pair<String, String> & login_password,
             const String & exchange_name_,
             const Names & routing_keys_,
             const size_t channel_id_,
@@ -40,13 +43,11 @@ public:
 
     void allowNext() { allowed = true; } // Allow to read next message.
     void checkSubscription();
+    void activateReading();
 
     auto getExchange() const { return exchange_name; }
 
 private:
-    ChannelPtr consumer_channel;
-    HandlerPtr event_handler;
-
     const String & exchange_name;
     const Names & routing_keys;
     const size_t channel_id;
@@ -63,6 +64,15 @@ private:
     bool stalled = false;
     bool allowed = true;
     const std::atomic<bool> & stopped;
+
+    std::unique_ptr<uv_loop_t> loop;
+    std::unique_ptr<RabbitMQHandler> event_handler;
+    std::unique_ptr<AMQP::TcpConnection> connection;
+    ChannelPtr consumer_channel;
+
+    BackgroundSchedulePool::TaskHolder heartbeat_task;
+    BackgroundSchedulePool::TaskHolder looping_task;
+    bool loop_started = false;
 
     String default_local_exchange;
     bool local_exchange_declared = false, local_hash_exchange_declared = false;
@@ -82,6 +92,8 @@ private:
     void initQueueBindings(const size_t queue_id);
     void subscribe(const String & queue_name);
     void startEventLoop();
+    void heartbeatFunc();
+    void loopingFunc();
 
 };
 }
