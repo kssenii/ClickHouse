@@ -46,7 +46,7 @@ Optional parameters:
 -   `rabbitmq_num_consumers` – The number of consumers per table. Default: `1`. Specify more consumers if the throughput of one consumer is insufficient.
 -   `rabbitmq_num_queues` – The number of queues per consumer. Default: `1`. Specify more queues if the capacity of one queue per consumer is insufficient.
 -   `rabbitmq_transactional_channel` – Wrap insert queries in transactions. Default: `0`.
--   `rabbitmq_queue_base` - Specify a base name for queues that will be declared. This settings should be used to be able to restore reading from declared durable queues in case of some failure when not all messages were successfully consumed. Note: it makes sence only if messages are sent with delivery mode 2 (marked 'persistent', durable). To be able to resume consumption from one specific queue in case of failure - set its name in `rabbitmq_queue_base` setting and do not specify `rabbitmq_num_consumers` and `rabbitmq_num_queues` (defaults to 1). To be able to resume consumption from all queues, which were declared for a specific table - just specify the same settings: `rabbitmq_queue_base`, `rabbitmq_num_consumers`, `rabbitmq_num_queues`.
+-   `rabbitmq_queue_base` - Specify a base name for queues that will be declared. This settings should be used to be able to restore reading from declared durable queues when not all messages were successfully consumed. Note: it makes sence only if messages are sent with delivery mode 2 (marked 'persistent', durable). To be able to resume consumption from one specific queue in case of failure - set its name in `rabbitmq_queue_base` setting and do not specify `rabbitmq_num_consumers` and `rabbitmq_num_queues` (defaults to 1). To be able to resume consumption from all queues, which were declared for a specific table - just specify the same settings: `rabbitmq_queue_base`, `rabbitmq_num_consumers`, `rabbitmq_num_queues`. It is also recommended to set this parameter to reuse queues, as they are not auto-deleted.
 -   `rabbitmq_deadletter_exchange` - Specify name for a [dead letter exchange](https://www.rabbitmq.com/dlx.html). You can create another table with this exchange name and collect messages in cases when they are republished to dead letter exchange. By default dead letter exchange is not specified.
 -   `persistent` - If set to 1 (true), in insert query delivery mode will be set to 2 (marks messages as 'persistent'). Default: `0`.
 
@@ -116,7 +116,8 @@ Example:
                             rabbitmq_num_consumers = 5;
 
   CREATE TABLE daily (key UInt64, value UInt64)
-    ENGINE = MergeTree();
+    ENGINE = MergeTree()
+    ORDER BY key;
 
   CREATE MATERIALIZED VIEW consumer TO daily
     AS SELECT key, value FROM queue;
