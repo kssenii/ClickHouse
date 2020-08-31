@@ -68,6 +68,7 @@ public:
 
     bool queueEmpty() { return received.empty(); }
     void allowNext() { allowed = true; } // Allow to read next message.
+    bool consumerStopped() { return stopped; }
 
     auto getChannelID() const { return current.track.channel_id; }
     auto getDeliveryTag() const { return current.track.delivery_tag; }

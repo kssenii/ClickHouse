@@ -14,13 +14,15 @@ namespace DB
 RabbitMQBlockInputStream::RabbitMQBlockInputStream(
     StorageRabbitMQ & storage_,
     const StorageMetadataPtr & metadata_snapshot_,
-    const std::shared_ptr<Context> & context_,
+    const Context & context_,
     const Names & columns,
+    size_t max_block_size_,
     bool ack_in_suffix_)
         : storage(storage_)
         , metadata_snapshot(metadata_snapshot_)
         , context(context_)
         , column_names(columns)
+        , max_block_size(max_block_size_)
         , ack_in_suffix(ack_in_suffix_)
         , non_virtual_header(metadata_snapshot->getSampleBlockNonMaterialized())
         , virtual_header(metadata_snapshot->getSampleBlockForColumns(
@@ -46,17 +48,8 @@ Block RabbitMQBlockInputStream::getHeader() const
 
 void RabbitMQBlockInputStream::readPrefixImpl()
 {
-    auto timeout = std::chrono::milliseconds(context->getSettingsRef().rabbitmq_max_wait_ms.totalMilliseconds());
+    auto timeout = std::chrono::milliseconds(context.getSettingsRef().rabbitmq_max_wait_ms.totalMilliseconds());
     buffer = storage.popReadBuffer(timeout);
-}
-
-
-bool RabbitMQBlockInputStream::needManualChannelUpdate()
-{
-    if (!buffer)
-        return false;
-
-    return !buffer->channelUsable() && buffer->channelAllowed() && storage.connectionRunning();
 }
 
 
@@ -72,6 +65,17 @@ void RabbitMQBlockInputStream::updateChannel()
 }
 
 
+bool RabbitMQBlockInputStream::needChannelUpdate()
+{
+    if (!buffer)
+        return false;
+
+    ChannelPtr channel = buffer->getChannel();
+
+    return !channel || !channel->usable();
+}
+
+
 Block RabbitMQBlockInputStream::readImpl()
 {
     if (!buffer || finished)
@@ -83,7 +87,7 @@ Block RabbitMQBlockInputStream::readImpl()
     MutableColumns virtual_columns = virtual_header.cloneEmptyColumns();
 
     auto input_format = FormatFactory::instance().getInputFormat(
-            storage.getFormatName(), *buffer, non_virtual_header, *context, 1);
+            storage.getFormatName(), *buffer, non_virtual_header, context, max_block_size);
 
     InputPort port(input_format->getPort().getHeader(), input_format.get());
     connect(input_format->getPort(), port);
@@ -135,10 +139,7 @@ Block RabbitMQBlockInputStream::readImpl()
 
     while (true)
     {
-        if (buffer->eof())
-            break;
-
-        auto new_rows = read_rabbitmq_message();
+        auto new_rows = !buffer->queueEmpty() ? read_rabbitmq_message() : 0;
 
         if (new_rows)
         {
@@ -164,7 +165,7 @@ Block RabbitMQBlockInputStream::readImpl()
 
         buffer->allowNext();
 
-        if (buffer->queueEmpty() || !checkTimeLimit())
+        if (total_rows >= max_block_size || buffer->queueEmpty() || buffer->consumerStopped() || !checkTimeLimit())
             break;
     }
 
@@ -189,7 +190,7 @@ void RabbitMQBlockInputStream::readSuffixImpl()
 
 bool RabbitMQBlockInputStream::sendAck()
 {
-    if (!buffer || !buffer->channelUsable())
+    if (!buffer)
         return false;
 
     if (!buffer->ackMessages())

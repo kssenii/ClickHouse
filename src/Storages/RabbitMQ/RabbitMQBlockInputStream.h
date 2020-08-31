@@ -16,8 +16,9 @@ public:
     RabbitMQBlockInputStream(
             StorageRabbitMQ & storage_,
             const StorageMetadataPtr & metadata_snapshot_,
-            const std::shared_ptr<Context> & context_,
+            const Context & context_,
             const Names & columns,
+            size_t max_block_size_,
             bool ack_in_suffix = true);
 
     ~RabbitMQBlockInputStream() override;
@@ -30,14 +31,15 @@ public:
     void readSuffixImpl() override;
 
     void updateChannel();
-    bool needManualChannelUpdate();
+    bool needChannelUpdate();
     bool sendAck();
 
 private:
     StorageRabbitMQ & storage;
     StorageMetadataPtr metadata_snapshot;
-    const std::shared_ptr<Context> context;
+    Context context;
     Names column_names;
+    size_t max_block_size;
     bool ack_in_suffix;
 
     bool finished = false;
