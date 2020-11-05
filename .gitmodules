@@ -190,3 +190,9 @@
 	path = contrib/croaring
 	url = https://github.com/RoaringBitmap/CRoaring
 	branch = v0.2.66
+[submodule "contrib/libpqxx"]
+	path = contrib/libpqxx
+	url = git@github.com:jtv/libpqxx.git
+[submodule "contrib/libpq"]
+	path = contrib/libpq
+	url = https://github.com/kssenii/libpq

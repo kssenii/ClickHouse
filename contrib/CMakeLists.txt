@@ -318,3 +318,8 @@ if (USE_KRB5)
         add_subdirectory (cyrus-sasl-cmake)
     endif()
 endif()
+
+if (USE_LIBPQXX)
+    add_subdirectory (libpq-cmake)
+    add_subdirectory (libpqxx-cmake)
+endif()

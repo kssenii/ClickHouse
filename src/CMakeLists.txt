@@ -286,6 +286,10 @@ if (USE_AMQPCPP)
     dbms_target_link_libraries(PUBLIC amqp-cpp)
 endif()
 
+if (USE_LIBPQXX)
+    dbms_target_link_libraries(PUBLIC libpqxx)
+endif()
+
 if (USE_CYRUS_SASL)
     dbms_target_link_libraries(PRIVATE ${CYRUS_SASL_LIBRARY})
 endif()
