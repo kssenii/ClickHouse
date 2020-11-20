@@ -22,6 +22,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int NUMBER_OF_COLUMNS_DOESNT_MATCH;
+    extern const int NOT_IMPLEMENTED;
 }
 
 MySQLBlockInputStream::Connection::Connection(
@@ -110,6 +111,8 @@ namespace
                 data_type.deserializeAsWholeText(column, buffer, FormatSettings{});
                 break;
             }
+            case ValueType::vtArray:
+                throw Exception("Array data types are not supported for MySql conversions", ErrorCodes::NOT_IMPLEMENTED);
         }
     }
 
