@@ -54,6 +54,10 @@ void registerStorageKafka(StorageFactory & factory);
 void registerStorageRabbitMQ(StorageFactory & factory);
 #endif
 
+#if USE_LIBPQXX
+void registerStoragePostgreSQL(StorageFactory & factory);
+#endif
+
 void registerStorages();
 
 }
