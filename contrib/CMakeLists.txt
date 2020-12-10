@@ -324,3 +324,8 @@ endif()
 
 add_subdirectory(dragonbox)
 add_subdirectory(fast_float)
+
+if (USE_LIBPQXX)
+    add_subdirectory (libpq-cmake)
+    add_subdirectory (libpqxx-cmake)
+endif()

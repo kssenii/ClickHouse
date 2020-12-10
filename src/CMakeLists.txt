@@ -416,6 +416,11 @@ if (USE_ROCKSDB)
     dbms_target_include_directories(SYSTEM BEFORE PUBLIC ${ROCKSDB_INCLUDE_DIR})
 endif()
 
+if (USE_LIBPQXX)
+    dbms_target_link_libraries(PUBLIC ${LIBPQXX_LIBRARY})
+    dbms_target_include_directories(SYSTEM BEFORE PUBLIC ${LIBPQXX_INCLUDE_DIR})
+endif()
+
 if (ENABLE_TESTS AND USE_GTEST)
     macro (grep_gtest_sources BASE_DIR DST_VAR)
         # Cold match files that are not in tests/ directories
