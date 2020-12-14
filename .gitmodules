@@ -211,9 +211,9 @@
 [submodule "contrib/fast_float"]
 	path = contrib/fast_float
 	url = https://github.com/fastfloat/fast_float
-[submodule "contrib/libpq"]
-	path = contrib/libpq
-	url = https://github.com/kssenii/libpq
 [submodule "contrib/libpqxx"]
 	path = contrib/libpqxx
 	url = https://github.com/jtv/libpqxx
+[submodule "contrib/libpq"]
+	path = contrib/libpq
+	url = https://github.com/kssenii/libpq
