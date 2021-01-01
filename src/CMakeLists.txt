@@ -81,6 +81,7 @@ endif()
 
 if (USE_LIBPQXX)
     add_headers_and_sources(dbms Databases/PostgreSQL)
+    add_headers_and_sources(dbms Storages/PostgreSQL)
 endif()
 
 if (USE_ROCKSDB)

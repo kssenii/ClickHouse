@@ -86,7 +86,7 @@ private:
 class PGConnection
 {
 public:
-    PGConnection(std::string & connection_str_) : connection_str(connection_str_) {}
+    PGConnection(const std::string & connection_str_) : connection_str(connection_str_) {}
     PGConnection(const PGConnection &) = delete;
     PGConnection operator =(const PGConnection &) = delete;
 
