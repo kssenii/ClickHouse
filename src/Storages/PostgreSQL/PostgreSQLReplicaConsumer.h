@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Storages/StoragePostgreSQL.h>
+#include "PostgreSQLConnection.h"
 #include "PostgreSQLReplicationHandler.h"
 #include "pqxx/pqxx"
 
@@ -18,10 +18,12 @@ public:
             const LSNPosition & start_lsn);
 
     void run();
+    void createSubscription();
 
 private:
     void startReplication(
             const std::string & slot_name, const std::string start_lsn, const int64_t timeline, const std::string & plugin_args);
+    void decodeReplicationMessage(const char * replication_message, size_t size);
 
     Poco::Logger * log;
     const std::string replication_slot_name;
