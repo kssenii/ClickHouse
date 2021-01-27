@@ -2,6 +2,18 @@
 
 #include "config_core.h"
 
+#include <Parsers/IAST.h>
+#include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTFunction.h>
+#include <Parsers/ASTIdentifier.h>
+#include <Parsers/ASTCreateQuery.h>
+#include <Parsers/ASTColumnDeclaration.h>
+
+#include <Interpreters/evaluateConstantExpression.h>
+#include <Interpreters/Context.h>
+#include <Interpreters/InterpreterCreateQuery.h>
+#include <Interpreters/ExpressionAnalyzer.h>
+
 #include <Storages/IStorage.h>
 #include <ext/shared_ptr_helper.h>
 #include <Interpreters/Context.h>
@@ -41,11 +53,19 @@ protected:
         const String & remote_table_name_,
         const ColumnsDescription & columns_,
         const ConstraintsDescription & constraints_,
+        const String & relative_data_path_,
         const Context & context_,
         const PostgreSQLReplicationHandler & replication_handler_,
         std::unique_ptr<PostgreSQLReplicationSettings> replication_settings_);
 
 private:
+    //Context createQueryContext();
+    std::shared_ptr<ASTColumnDeclaration> getMaterializedColumnsDeclaration(
+            const String name, const String type, UInt64 default_value);
+    std::shared_ptr<ASTColumns> getColumnsListFromStorage();
+    ASTPtr getColumnDeclaration(const DataTypePtr & data_type);
+    ASTPtr getCreateHelperTableQuery();
+
     String remote_table_name;
     Context global_context;
 

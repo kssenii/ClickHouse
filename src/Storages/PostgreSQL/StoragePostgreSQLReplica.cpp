@@ -1,26 +1,27 @@
 #include "StoragePostgreSQLReplica.h"
 
-#include <Interpreters/evaluateConstantExpression.h>
-#include <Interpreters/Context.h>
-
 #include <DataTypes/DataTypeString.h>
+#include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeArray.h>
 
-#include <Core/Settings.h>
-#include <Common/parseAddress.h>
-#include <Common/assert_cast.h>
-#include <Parsers/ASTLiteral.h>
-#include <Columns/ColumnNullable.h>
+#include <Databases/DatabaseOnDisk.h>
 #include <Formats/FormatFactory.h>
 #include <Formats/FormatSettings.h>
-#include <Processors/Sources/SourceFromInputStream.h>
-#include <DataStreams/ConvertingBlockInputStream.h>
-#include <Processors/Pipe.h>
-#include <IO/WriteHelpers.h>
+
 #include <Common/Macros.h>
 #include <Core/Settings.h>
-#include <Parsers/ASTCreateQuery.h>
-#include "PostgreSQLReplicationSettings.h"
+
+#include <Common/parseAddress.h>
+#include <Common/assert_cast.h>
+
+#include <Processors/Sources/SourceFromInputStream.h>
+#include <Processors/Pipe.h>
+#include <DataStreams/ConvertingBlockInputStream.h>
+#include <Interpreters/executeQuery.h>
+
 #include <Storages/StorageFactory.h>
+
+#include "PostgreSQLReplicationSettings.h"
 #include "PostgreSQLReplicaBlockInputStream.h"
 
 
@@ -37,6 +38,7 @@ StoragePostgreSQLReplica::StoragePostgreSQLReplica(
     const String & remote_table_name_,
     const ColumnsDescription & columns_,
     const ConstraintsDescription & constraints_,
+    const String & relative_data_path_,
     const Context & context_,
     const PostgreSQLReplicationHandler & replication_handler_,
     std::unique_ptr<PostgreSQLReplicationSettings> replication_settings_)
@@ -50,6 +52,120 @@ StoragePostgreSQLReplica::StoragePostgreSQLReplica(
     storage_metadata.setColumns(columns_);
     storage_metadata.setConstraints(constraints_);
     setInMemoryMetadata(storage_metadata);
+
+    /// Helper table (ReplacingMergeTree).
+    const auto ast_create = getCreateHelperTableQuery()->as<const ASTCreateQuery &>();
+    Context context_copy(global_context);
+    StoragePtr table = createTableFromAST(ast_create, table_id_.database_name, relative_data_path_, context_copy, false).second;
+}
+
+
+//Context StoragePostgreSQLReplica::createQueryContext()
+//{
+//    //Settings new_query_settings = context.getSettings();
+//    //new_query_settings.insert_allow_materialized_columns = true;
+//    //CurrentThread::QueryScope query_scope(query_context);
+//
+//    //Context query_context(global_context);
+//    //query_context.setSettings(new_query_settings);
+//
+//    //query_context.getClientInfo().query_kind = ClientInfo::QueryKind::SECONDARY_QUERY;
+//    //query_context.setCurrentQueryId(""); // generate random query_id
+//    //return query_context;
+//    re
+//}
+
+
+std::shared_ptr<ASTColumnDeclaration> StoragePostgreSQLReplica::getMaterializedColumnsDeclaration(
+        const String name, const String type, UInt64 default_value)
+{
+    auto column_declaration = std::make_shared<ASTColumnDeclaration>();
+
+    column_declaration->name = name;
+    column_declaration->type = makeASTFunction(type);
+
+    column_declaration->default_specifier = "MATERIALIZED";
+    column_declaration->default_expression = std::make_shared<ASTLiteral>(default_value);
+
+    column_declaration->children.emplace_back(column_declaration->type);
+    column_declaration->children.emplace_back(column_declaration->default_expression);
+
+    return column_declaration;
+}
+
+
+ASTPtr StoragePostgreSQLReplica::getColumnDeclaration(const DataTypePtr & data_type)
+{
+    WhichDataType which(data_type);
+
+    if (which.isNullable())
+        return makeASTFunction("Nullable", getColumnDeclaration(typeid_cast<const DataTypeNullable *>(data_type.get())->getNestedType()));
+
+    if (which.isArray())
+        return makeASTFunction("Array", getColumnDeclaration(typeid_cast<const DataTypeArray *>(data_type.get())->getNestedType()));
+
+    return std::make_shared<ASTIdentifier>(data_type->getName());
+}
+
+
+std::shared_ptr<ASTColumns> StoragePostgreSQLReplica::getColumnsListFromStorage()
+{
+    auto columns_declare_list = std::make_shared<ASTColumns>();
+
+    auto columns_expression_list = std::make_shared<ASTExpressionList>();
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    for (const auto & column_type_and_name : metadata_snapshot->getColumns().getOrdinary())
+    {
+        const auto & column_declaration = std::make_shared<ASTColumnDeclaration>();
+        column_declaration->name = column_type_and_name.name;
+        column_declaration->type = getColumnDeclaration(column_type_and_name.type);
+        columns_expression_list->children.emplace_back(column_declaration);
+    }
+    columns_declare_list->set(columns_declare_list->columns, columns_expression_list);
+
+    columns_declare_list->columns->children.emplace_back(getMaterializedColumnsDeclaration("_sign", "Int8", UInt64(1)));
+    columns_declare_list->columns->children.emplace_back(getMaterializedColumnsDeclaration("_version", "UInt64", UInt64(1)));
+
+    return columns_declare_list;
+}
+
+
+ASTPtr StoragePostgreSQLReplica::getCreateHelperTableQuery()
+{
+    auto create_table_query = std::make_shared<ASTCreateQuery>();
+
+    auto table_id = getStorageID();
+    create_table_query->table = table_id.table_name + "_ReplacingMergeTree";
+    create_table_query->database = table_id.database_name;
+
+    create_table_query->set(create_table_query->columns_list, getColumnsListFromStorage());
+
+    auto storage = std::make_shared<ASTStorage>();
+    storage->set(storage->engine, makeASTFunction("ReplacingMergeTree", std::make_shared<ASTIdentifier>("_version")));
+
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    if (metadata_snapshot->hasSortingKey())
+        storage->set(storage->order_by, metadata_snapshot->getSortingKey().expression_list_ast);
+    else
+        throw Exception("Storage PostgreSQLReplica requires order by key", ErrorCodes::BAD_ARGUMENTS);
+
+    //const auto & create_defines = create_query.columns_list->as<MySQLParser::ASTCreateDefines>();
+
+    //NamesAndTypesList columns_name_and_type = getColumnsList(create_defines->columns);
+    //const auto & [primary_keys, unique_keys, keys, increment_columns] = getKeys(create_defines->columns, create_defines->indices, context, columns_name_and_type);
+
+    ///// The `partition by` expression must use primary keys, otherwise the primary keys will not be merge.
+    //ASTPtr partition_expression = getPartitionPolicy(primary_keys);
+    ///// The `order by` expression must use primary keys, otherwise the primary keys will not be merge.
+    //ASTPtr order_by_expression = getOrderByPolicy(primary_keys, unique_keys, keys, increment_columns);
+
+    //if (partition_expression)
+    //    storage->set(storage->partition_by, partition_expression);
+    //if (order_by_expression)
+
+    create_table_query->set(create_table_query->storage, storage);
+
+    return create_table_query;
 }
 
 
@@ -61,7 +177,6 @@ void StoragePostgreSQLReplica::startup()
 
 void StoragePostgreSQLReplica::shutdown()
 {
-    //replication_handler->dropReplicationSlot();
 }
 
 
@@ -76,6 +191,13 @@ Pipe StoragePostgreSQLReplica::read(
 {
     auto sample_block = metadata_snapshot->getSampleBlockForColumns(column_names, getVirtuals(), getStorageID());
     return Pipe();
+}
+
+
+NamesAndTypesList StoragePostgreSQLReplica::getVirtuals() const
+{
+    return NamesAndTypesList{
+    };
 }
 
 
@@ -116,21 +238,15 @@ void registerStoragePostgreSQLReplica(StorageFactory & factory)
         PostgreSQLReplicationHandler replication_handler(global_context, remote_database, remote_table, connection_str, replication_slot_name, publication_name);
 
         return StoragePostgreSQLReplica::create(
-                args.table_id, remote_table, args.columns, args.constraints, global_context,
+                args.table_id, remote_table, args.columns, args.constraints, args.relative_data_path, global_context,
                 replication_handler, std::move(postgresql_replication_settings));
     };
 
     factory.registerStorage(
             "PostgreSQLReplica",
             creator_fn,
-            StorageFactory::StorageFeatures{ .supports_settings = true, .source_access_type = AccessType::POSTGRES,
+            StorageFactory::StorageFeatures{ .supports_settings = true, .supports_sort_order = true, .source_access_type = AccessType::POSTGRES,
     });
-}
-
-NamesAndTypesList StoragePostgreSQLReplica::getVirtuals() const
-{
-    return NamesAndTypesList{
-    };
 }
 
 }

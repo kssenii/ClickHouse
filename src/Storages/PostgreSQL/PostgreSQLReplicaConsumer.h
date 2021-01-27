@@ -19,22 +19,25 @@ public:
             const std::string & publication_name_,
             const LSNPosition & start_lsn);
 
-    void run();
-    void createSubscription();
+    /// Start reading WAL from current_lsn position. Initial data sync from created snapshot already done.
+    void startSynchronization();
+    void stopSynchronization();
 
 private:
+    /// Executed by wal_reader_task. A separate thread reads wal and advances lsn when rows were written via copyData.
+    void WALReaderFunc();
+
+    /// Start changes stream from WAL via copy command (up to max_block_size changes).
+    bool readFromReplicationSlot();
+    void decodeReplicationMessage(const char * replication_message, size_t size);
+
+    /// Methods to parse replication message data.
+    void readTupleData(const char * message, size_t & pos, size_t size);
     void readString(const char * message, size_t & pos, size_t size, String & result);
     Int64 readInt64(const char * message, size_t & pos);
     Int32 readInt32(const char * message, size_t & pos);
     Int16 readInt16(const char * message, size_t & pos);
     Int8 readInt8(const char * message, size_t & pos);
-    void readTupleData(const char * message, size_t & pos, size_t size);
-
-    void startReplication(
-            const std::string & slot_name, const std::string start_lsn, const int64_t timeline, const std::string & plugin_args);
-    void decodeReplicationMessage(const char * replication_message, size_t size);
-
-    void WALReaderFunc();
 
     Poco::Logger * log;
     Context & context;
@@ -46,6 +49,7 @@ private:
 
     LSNPosition current_lsn;
     BackgroundSchedulePool::TaskHolder wal_reader_task;
+    std::atomic<bool> stop_synchronization = false;
 };
 
 }

@@ -16,6 +16,10 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
+static const auto wal_reader_reschedule_ms = 500;
+static const auto max_thread_work_duration_ms = 60000;
+static const auto max_empty_slot_reads = 20;
+
 PostgreSQLReplicaConsumer::PostgreSQLReplicaConsumer(
     Context & context_,
     const std::string & table_name_,
@@ -35,6 +39,48 @@ PostgreSQLReplicaConsumer::PostgreSQLReplicaConsumer(
 
     wal_reader_task = context.getSchedulePool().createTask("PostgreSQLReplicaWALReader", [this]{ WALReaderFunc(); });
     wal_reader_task->deactivate();
+}
+
+
+void PostgreSQLReplicaConsumer::startSynchronization()
+{
+    wal_reader_task->activateAndSchedule();
+}
+
+
+void PostgreSQLReplicaConsumer::stopSynchronization()
+{
+    stop_synchronization.store(true);
+    wal_reader_task->deactivate();
+}
+
+
+void PostgreSQLReplicaConsumer::WALReaderFunc()
+{
+    size_t count_empty_slot_reads = 0;
+    auto start_time = std::chrono::steady_clock::now();
+
+    while (!stop_synchronization)
+    {
+        if (!readFromReplicationSlot() && ++count_empty_slot_reads == max_empty_slot_reads)
+        {
+            LOG_TRACE(log, "Reschedule synchronization. Replication slot is empty.");
+            break;
+        }
+        else
+            count_empty_slot_reads = 0;
+
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        if (duration.count() > max_thread_work_duration_ms)
+        {
+            LOG_TRACE(log, "Reschedule synchronization. Thread work duration limit exceeded.");
+            break;
+        }
+    }
+
+    if (!stop_synchronization)
+        wal_reader_task->scheduleAfter(wal_reader_reschedule_ms);
 }
 
 
@@ -195,39 +241,48 @@ void PostgreSQLReplicaConsumer::decodeReplicationMessage(const char * replicatio
 }
 
 
-void PostgreSQLReplicaConsumer::run()
+/// Read binary changes from replication slot via copy command.
+bool PostgreSQLReplicaConsumer::readFromReplicationSlot()
 {
-    auto tx = std::make_unique<pqxx::nontransaction>(*replication_connection->conn());
-    /// up_to_lsn is set to NULL, up_to_n_changes is set to max_block_size.
-    std::string query_str = fmt::format(
-            "select data FROM pg_logical_slot_peek_binary_changes("
-            "'{}', NULL, NULL, 'publication_names', '{}', 'proto_version', '1')",
-            replication_slot_name, publication_name);
-    pqxx::stream_from stream(*tx, pqxx::from_query, std::string_view(query_str));
-
-    while (true)
+    bool slot_empty = true;
+    try
     {
-        const std::vector<pqxx::zview> * row{stream.read_row()};
+        auto tx = std::make_unique<pqxx::nontransaction>(*replication_connection->conn());
+        /// up_to_lsn is set to NULL, up_to_n_changes is set to max_block_size.
+        std::string query_str = fmt::format(
+                "select data FROM pg_logical_slot_peek_binary_changes("
+                "'{}', NULL, NULL, 'publication_names', '{}', 'proto_version', '1')",
+                replication_slot_name, publication_name);
+        pqxx::stream_from stream(*tx, pqxx::from_query, std::string_view(query_str));
 
-        if (!row)
+        while (true)
         {
-            LOG_TRACE(log, "STREAM REPLICATION END");
-            stream.complete();
-            tx->commit();
-            break;
-        }
+            const std::vector<pqxx::zview> * row{stream.read_row()};
 
-        for (const auto idx : ext::range(0, row->size()))
-        {
-            LOG_TRACE(log, "Replication message: {}", (*row)[idx]);
-            decodeReplicationMessage((*row)[idx].c_str(), (*row)[idx].size());
+            if (!row)
+            {
+                LOG_TRACE(log, "STREAM REPLICATION END");
+                stream.complete();
+                tx->commit();
+                break;
+            }
+
+            slot_empty = false;
+
+            for (const auto idx : ext::range(0, row->size()))
+            {
+                LOG_TRACE(log, "Replication message: {}", (*row)[idx]);
+                decodeReplicationMessage((*row)[idx].c_str(), (*row)[idx].size());
+            }
         }
     }
-}
+    catch (...)
+    {
+        tryLogCurrentException(__PRETTY_FUNCTION__);
+        return false;
+    }
 
-
-void PostgreSQLReplicaConsumer::WALReaderFunc()
-{
+    return !slot_empty;
 }
 
 }

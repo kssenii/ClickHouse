@@ -3,6 +3,7 @@
 
 #include <Formats/FormatFactory.h>
 #include <Formats/FormatSettings.h>
+#include <DataStreams/PostgreSQLBlockInputStream.h>
 
 namespace DB
 {
@@ -120,7 +121,7 @@ void PostgreSQLReplicationHandler::startReplication()
     loadFromSnapshot(snapshot_name);
 
     /// Do not need this replication slot anymore (snapshot loaded and start lsn determined, will continue replication protocol
-    /// with another slot, which should be the same at restart (and reused) to minimize memory usage)
+    /// with another slot, which should be the same at restart (and reused) to minimize memory usage.
     dropReplicationSlot(ntx, temp_replication_slot, true);
 
     /// Non temporary replication slot should be deleted with drop table only.
@@ -138,7 +139,7 @@ void PostgreSQLReplicationHandler::startReplication()
     LOG_DEBUG(log, "Commiting replication transaction");
     ntx->commit();
 
-    consumer.run();
+    consumer.startSynchronization();
 }
 
 
@@ -225,29 +226,43 @@ void PostgreSQLReplicationHandler::checkAndDropReplicationSlot()
 
 void PostgreSQLReplicationHandler::loadFromSnapshot(std::string & snapshot_name)
 {
-    auto stx = std::make_unique<pqxx::work>(*connection->conn());
-    /// Required to execute the following command.
-    stx->set_variable("transaction_isolation", "'repeatable read'");
+    LOG_DEBUG(log, "Creating transaction snapshot");
 
-    std::string query_str = fmt::format("SET TRANSACTION SNAPSHOT '{}'", snapshot_name);
-    stx->exec(query_str);
-
-    LOG_DEBUG(log, "Created transaction snapshot");
-    query_str = fmt::format("SELECT * FROM {}", table_name);
-    pqxx::result result{stx->exec(query_str)};
-    if (!result.empty())
+    try
     {
-        pqxx::row row{result[0]};
-        for (auto res : row)
-        {
-            if (std::size(res))
-                LOG_TRACE(log, "GOT {}", res.as<std::string>());
-            else
-                LOG_TRACE(log, "GOT NULL");
-        }
+        //auto out = std::make_shared<CountingBlockOutputStream>(getTableOutput(database_name, table_name, query_context));
+
+        ///// Specific isolation level is required to read from snapshot.
+        //auto stx = std::make_unique<pqxx::work>(*connection->conn());
+        //stx->set_variable("transaction_isolation", "'repeatable read'");
+        //std::string query_str = fmt::format("SET TRANSACTION SNAPSHOT '{}'", snapshot_name);
+        //stx->exec(query_str);
+        //query_str = fmt::format("SELECT * FROM {}", table_name);
+
+        //PostgreSQLBlockInputStream input(std::move(stx), query_str, out->getHeader(), DEFAULT_BLOCK_SIZE);
+        //copyData(input, *out);
     }
+    catch (Exception & e)
+    {
+        e.addMessage("while initial data sync from snapshot {}", snapshot_name);
+        throw;
+    }
+
+
+    //pqxx::result result{stx->exec(query_str)};
+    //if (!result.empty())
+    //{
+    //    pqxx::row row{result[0]};
+    //    for (auto res : row)
+    //    {
+    //        if (std::size(res))
+    //            LOG_TRACE(log, "GOT {}", res.as<std::string>());
+    //        else
+    //            LOG_TRACE(log, "GOT NULL");
+    //    }
+    //}
     LOG_DEBUG(log, "Done loading from snapshot");
-    stx->commit();
+    //stx->commit();
 }
 
 
