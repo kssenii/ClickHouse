@@ -67,9 +67,6 @@ private:
     };
 
     /// Start changes stream from WAL via copy command (up to max_block_size changes).
-    bool readFromReplicationSlot();
-    void processReplicationMessage(const char * replication_message, size_t size);
-
     void insertValue(std::string & value, size_t column_idx);
     //static void insertValueMaterialized(IColumn & column, uint64_t value);
     void insertDefaultValue(size_t column_idx);
@@ -78,12 +75,16 @@ private:
     String advanceLSN(std::shared_ptr<pqxx::nontransaction> ntx);
 
     /// Methods to parse replication message data.
-    void readTupleData(const char * message, size_t & pos, PostgreSQLQuery type, bool old_value = false);
     void readString(const char * message, size_t & pos, size_t size, String & result);
     Int64 readInt64(const char * message, size_t & pos);
     Int32 readInt32(const char * message, size_t & pos);
     Int16 readInt16(const char * message, size_t & pos);
     Int8 readInt8(const char * message, size_t & pos);
+
+    void readTupleData(const char * message, size_t & pos, PostgreSQLQuery type, bool old_value = false);
+    void processReplicationMessage(const char * replication_message, size_t size, size_t & num_rows);
+    bool streamChanges();
+    bool readFromReplicationSlot(size_t & num_rows);
 
     Poco::Logger * log;
     std::shared_ptr<Context> context;

@@ -35,9 +35,10 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-static const auto reschedule_ms = 500;
-static const auto max_thread_work_duration_ms = 60000;
-static const auto max_empty_slot_reads = 16;
+static const auto RESCHEDULE_MS = 500;
+static const auto MAX_EMPTY_READS = 20;
+static const auto MAX_EMPTY_READS_BEFORE_FLUSH = 2;
+static const auto MAX_THREAD_WORK_DURATION_MS = 60000;
 
 
 PostgreSQLReplicaConsumer::PostgreSQLReplicaConsumer(
@@ -88,7 +89,6 @@ void PostgreSQLReplicaConsumer::stopSynchronization()
 
 void PostgreSQLReplicaConsumer::replicationStream()
 {
-    size_t count_empty_slot_reads = 0;
     auto start_time = std::chrono::steady_clock::now();
     metadata.readMetadata();
 
@@ -96,17 +96,15 @@ void PostgreSQLReplicaConsumer::replicationStream()
 
     while (!stop_synchronization)
     {
-        if (!readFromReplicationSlot() && ++count_empty_slot_reads == max_empty_slot_reads)
+        if (!streamChanges())
         {
             LOG_TRACE(log, "Reschedule replication stream. Replication slot is empty.");
             break;
         }
-        else
-            count_empty_slot_reads = 0;
 
         auto end_time = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        if (duration.count() > max_thread_work_duration_ms)
+        if (duration.count() > MAX_THREAD_WORK_DURATION_MS)
         {
             LOG_TRACE(log, "Reschedule replication_stream. Thread work duration limit exceeded.");
             break;
@@ -114,7 +112,7 @@ void PostgreSQLReplicaConsumer::replicationStream()
     }
 
     if (!stop_synchronization)
-        wal_reader_task->scheduleAfter(reschedule_ms);
+        wal_reader_task->scheduleAfter(RESCHEDULE_MS);
 }
 
 
@@ -255,7 +253,7 @@ void PostgreSQLReplicaConsumer::readTupleData(const char * message, size_t & pos
 }
 
 
-void PostgreSQLReplicaConsumer::processReplicationMessage(const char * replication_message, size_t size)
+void PostgreSQLReplicaConsumer::processReplicationMessage(const char * replication_message, size_t size, size_t & num_rows)
 {
     /// Skip '\x'
     size_t pos = 2;
@@ -323,6 +321,7 @@ void PostgreSQLReplicaConsumer::processReplicationMessage(const char * replicati
 
             LOG_DEBUG(log, "relationID {}, newTuple {}", relation_id, new_tuple);
             readTupleData(replication_message, pos, PostgreSQLQuery::INSERT);
+            ++num_rows;
             break;
         }
         case 'U': // Update
@@ -333,12 +332,14 @@ void PostgreSQLReplicaConsumer::processReplicationMessage(const char * replicati
             LOG_DEBUG(log, "relationID {}, key {}", relation_id, primary_key_or_old_tuple_data);
 
             readTupleData(replication_message, pos, PostgreSQLQuery::UPDATE, true);
+            ++num_rows;
 
             if (pos + 1 < size)
             {
                 Int8 new_tuple_data = readInt8(replication_message, pos);
                 LOG_DEBUG(log, "new tuple data {}", new_tuple_data);
                 readTupleData(replication_message, pos, PostgreSQLQuery::UPDATE);
+                ++num_rows;
             }
 
             break;
@@ -354,6 +355,7 @@ void PostgreSQLReplicaConsumer::processReplicationMessage(const char * replicati
             //LOG_DEBUG(log, "relationID {}, index replica identity {} full replica identity {}",
             //        relation_id, index_replica_identity, full_replica_identity);
             readTupleData(replication_message, pos, PostgreSQLQuery::DELETE);
+            ++num_rows;
             break;
         }
         case 'T': // Truncate
@@ -398,25 +400,56 @@ String PostgreSQLReplicaConsumer::advanceLSN(std::shared_ptr<pqxx::nontransactio
 }
 
 
-/// Read binary changes from replication slot via copy command.
-bool PostgreSQLReplicaConsumer::readFromReplicationSlot()
+bool PostgreSQLReplicaConsumer::streamChanges()
 {
     columns = description.sample_block.cloneEmptyColumns();
     std::shared_ptr<pqxx::nontransaction> tx;
-    bool slot_empty = true;
+    size_t num_rows = 0, count_empty_reads = 0;
 
-    try
+    while (!stop_synchronization
+            && num_rows < max_block_size
+            && count_empty_reads < (num_rows ? MAX_EMPTY_READS_BEFORE_FLUSH : MAX_EMPTY_READS))
+    {
+        if (!readFromReplicationSlot(num_rows))
+            ++count_empty_reads;
+        else
+            count_empty_reads = 0;
+
+        LOG_TRACE(log, "kssenii num_rows {} max_block_size {} count_empty_reads {}",
+                num_rows, max_block_size, count_empty_reads);
+    }
+
+    Block result_rows = description.sample_block.cloneWithColumns(std::move(columns));
+    if (result_rows.rows())
     {
         tx = std::make_shared<pqxx::nontransaction>(*connection->conn());
-        //tx->set_variable("transaction_isolation", "'repeatable read'");
+        metadata.commitMetadata(final_lsn.lsn, [&]()
+        {
+            syncIntoTable(result_rows);
+            advanceLSN(tx);
+        });
 
-        /// up_to_lsn is set to NULL, up_to_n_changes is set to max_block_size.
+        return true;
+    }
+
+    return false;
+}
+
+
+/// Read binary changes from replication slot via COPY command.
+bool PostgreSQLReplicaConsumer::readFromReplicationSlot(size_t & num_rows)
+{
+    try
+    {
+        auto tx = std::make_shared<pqxx::nontransaction>(*connection->conn());
+
         std::string query_str = fmt::format(
-                "select lsn, data FROM pg_logical_slot_peek_binary_changes("
+                "select lsn, data FROM pg_logical_slot_get_binary_changes("
                 "'{}', NULL, NULL, 'publication_names', '{}', 'proto_version', '1')",
                 replication_slot_name, publication_name);
+
         pqxx::stream_from stream(*tx, pqxx::from_query, std::string_view(query_str));
-        LOG_DEBUG(log, "Starting replication stream");
+        bool slot_empty = true;
 
         while (true)
         {
@@ -428,11 +461,9 @@ bool PostgreSQLReplicaConsumer::readFromReplicationSlot()
                 stream.complete();
 
                 if (slot_empty)
-                {
-                    tx->commit();
                     return false;
-                }
 
+                tx->commit();
                 break;
             }
 
@@ -440,24 +471,13 @@ bool PostgreSQLReplicaConsumer::readFromReplicationSlot()
 
             current_lsn.lsn = (*row)[0];
             LOG_TRACE(log, "Replication message: {}", (*row)[1]);
-            processReplicationMessage((*row)[1].c_str(), (*row)[1].size());
+            processReplicationMessage((*row)[1].c_str(), (*row)[1].size(), num_rows);
         }
     }
     catch (...)
     {
         tryLogCurrentException(__PRETTY_FUNCTION__);
         return false;
-    }
-
-    Block result_rows = description.sample_block.cloneWithColumns(std::move(columns));
-    if (result_rows.rows())
-    {
-        assert(!slot_empty);
-        metadata.commitMetadata(final_lsn.lsn, [&]()
-        {
-            syncIntoTable(result_rows);
-            return advanceLSN(tx);
-        });
     }
 
     return true;
