@@ -91,19 +91,15 @@ DatabasePostgreSQLReplica<DatabaseAtomic>::DatabasePostgreSQLReplica(
 template<typename Base>
 void DatabasePostgreSQLReplica<Base>::startSynchronization()
 {
-    auto publication_name = global_context.getMacros()->expand(settings->postgresql_publication_name.value);
-    auto replication_slot = global_context.getMacros()->expand(settings->postgresql_replication_slot_name.value);
-
     replication_handler = std::make_unique<PostgreSQLReplicationHandler>(
             remote_database_name,
             connection->conn_str(),
             metadata_path + METADATA_SUFFIX,
             std::make_shared<Context>(global_context),
-            replication_slot,
-            publication_name,
             settings->postgresql_max_block_size.changed
                      ? settings->postgresql_max_block_size.value
-                     : (global_context.getSettingsRef().max_insert_block_size.value));
+                     : (global_context.getSettingsRef().max_insert_block_size.value),
+            global_context.getMacros()->expand(settings->postgresql_tables_list.value));
 
     std::unordered_set<std::string> tables_to_replicate = replication_handler->fetchRequiredTables(connection->conn());
 
