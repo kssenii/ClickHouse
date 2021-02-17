@@ -342,3 +342,20 @@ def test_bridge_dies_with_parent(started_cluster):
 
     assert clickhouse_pid is None
     assert bridge_pid is None
+
+
+def test_odbc_date_data_type(started_cluster):
+    conn = get_postgres_conn();
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS clickhouse.test_date (id integer, data date)")
+    cursor.execute("INSERT INTO clickhouse.test_date VALUES (1, '2020.12.23')")
+    cursor.execute("INSERT INTO clickhouse.test_date VALUES (2, '2020.12.22')")
+    cursor.execute("INSERT INTO clickhouse.test_date VALUES (3, '2020.12.21')")
+    conn.commit()
+
+    node1.query(
+        "CREATE TABLE pg_insert (id Int32, date Date) ENGINE=ODBC('DSN=postgresql_odbc;Servername=postgre-sql.local', 'clickhouse', 'test_table')")
+
+    result = node1.query('SELECT * FROM pg_insert');
+    print(result)
+
