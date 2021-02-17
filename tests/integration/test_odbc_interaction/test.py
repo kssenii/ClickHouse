@@ -1,4 +1,5 @@
 import time
+import sys
 
 import psycopg2
 import pymysql.cursors
@@ -347,15 +348,71 @@ def test_bridge_dies_with_parent(started_cluster):
 def test_odbc_date_data_type(started_cluster):
     conn = get_postgres_conn();
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS clickhouse.test_date (id integer, data date)")
-    cursor.execute("INSERT INTO clickhouse.test_date VALUES (1, '2020.12.23')")
-    cursor.execute("INSERT INTO clickhouse.test_date VALUES (2, '2020.12.22')")
-    cursor.execute("INSERT INTO clickhouse.test_date VALUES (3, '2020.12.21')")
+    cursor.execute("CREATE TABLE IF NOT EXISTS clickhouse.test_date (column1 integer, column2 date)")
+    cursor.execute("INSERT INTO clickhouse.test_date VALUES (1, '2020-12-01')")
+    cursor.execute("INSERT INTO clickhouse.test_date VALUES (2, '2020-12-02')")
+    cursor.execute("INSERT INTO clickhouse.test_date VALUES (3, '2020-12-03')")
     conn.commit()
 
     node1.query(
-        "CREATE TABLE pg_insert (id Int32, date Date) ENGINE=ODBC('DSN=postgresql_odbc;Servername=postgre-sql.local', 'clickhouse', 'test_table')")
+        '''
+        CREATE TABLE test_date (column1 UInt64, column2 Date)
+        ENGINE=ODBC('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_date')''')
 
-    result = node1.query('SELECT * FROM pg_insert');
+    expected = '1\t2020-12-01\n2\t2020-12-02\n3\t2020-12-03\n'
+    result = node1.query('SELECT * FROM test_date');
     print(result)
+    assert(result == expected)
 
+
+def test_odbc_cyrillic(started_cluster):
+    conn = get_postgres_conn();
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS clickhouse.test_date (column1 integer, column2 varchar(50))")
+
+    text = ''
+    for i in range(50):
+        text += 'привет'
+    #1text = 'Какой-то текст о чем-то важном наверное'
+    text = 'this is a very very very imprtant text'
+
+    cursor.execute("INSERT INTO clickhouse.test_date VALUES (1, '{}')".format(text))
+    conn.commit()
+
+    node1.query(
+        '''
+        CREATE TABLE test_date (column1 UInt64, column2 String)
+        ENGINE=ODBC('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_date')''')
+
+    result = node1.query('SELECT column2 FROM test_date LIMIT 1')
+
+    result = u''.join(result.strip()).encode('utf8').strip()
+    expected = u''.join(text).encode('utf8').strip()
+
+    print(result)
+    print(expected)
+    assert(result == expected)
+
+    #print(u' '.join(result.strip()).encode('utf8').strip().decode("UTF-8"))
+    #print(str(u' '.join(result.strip()).encode('utf8').strip(), "UTF-8"))
+    #assert(result == expected)
+
+    #node1.query('''
+    #        CREATE DICTIONARY db.test_date (`id` UInt64, `date` Date)
+    #        PRIMARY KEY id SOURCE(
+    #        ODBC(TABLE 'public.test_date' CONNECTION_STRING 'DSN=postgresql_odbc' DB clickhouse) 
+    #        ) LAYOUT(DIRECT())''')
+
+    #node1.query("SYSTEM RELOAD DICTIONARY postgres_odbc_hashed")
+
+    #result = node1.query("select dictGet('postgres_odbc_hashed', 'column1', toUInt64(1))")
+    #print(result)
+    #result = node1.query("select dictGet('postgres_odbc_hashed', 'column1', toUInt64(2))")
+    #print(result)
+
+    #result = node1.query("select dictGet('postgres_odbc_hashed', 'column2', toUInt64(1))")
+    #print(result)
+    #result = node1.query("select dictGet('postgres_odbc_hashed', 'column2', toUInt64(2))")
+    #print(result)
+    #result = node1.query("select dictGet('postgres_odbc_hashed', 'column2', toUInt64(3))")
+    #print(result)
