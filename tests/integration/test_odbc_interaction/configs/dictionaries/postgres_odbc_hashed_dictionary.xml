@@ -29,8 +29,8 @@
 
            <attribute>
                <name>column2</name>
-               <type>String</type>
-               <null_value>''</null_value>
+               <type>Date</type>
+               <null_value>'2000-12-12'</null_value>
            </attribute>
 
        </structure>
