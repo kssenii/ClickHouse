@@ -1,7 +1,10 @@
-#include "PostgreSQLConnection.h"
+#pragma once
+
+#include <pqxx/pqxx> // Y_IGNORE
 #include <Core/Types.h>
 #include <Poco/Util/AbstractConfiguration.h>
-#include <common/logger_useful.h>
+#include "PostgreSQLConnectionPool.h"
+
 
 namespace DB
 {
@@ -14,18 +17,17 @@ public:
 
     PostgreSQLReplicaConnection(
         const Poco::Util::AbstractConfiguration & config,
-        const String & config_name,
-        const size_t num_retries = POSTGRESQL_CONNECTION_DEFAULT_RETRIES_NUM);
+        const String & config_prefix,
+        const size_t num_retries_ = POSTGRESQL_CONNECTION_DEFAULT_RETRIES_NUM);
 
     PostgreSQLReplicaConnection(const PostgreSQLReplicaConnection & other);
 
-    PostgreSQLConnection::ConnectionPtr get();
+    PostgreSQLConnectionPoolPtr get();
 
 
 private:
-    using ReplicasByPriority = std::map<size_t, PostgreSQLConnectionPtr>;
+    using ReplicasByPriority = std::map<size_t, PostgreSQLConnectionPoolPtr>;
 
-    Poco::Logger * log;
     ReplicasByPriority replicas;
     size_t num_retries;
 };

@@ -42,14 +42,14 @@ namespace ErrorCodes
 StoragePostgreSQL::StoragePostgreSQL(
     const StorageID & table_id_,
     const String & remote_table_name_,
-    PostgreSQLConnectionPtr connection_,
+    PostgreSQLConnectionPoolPtr connection_pool_,
     const ColumnsDescription & columns_,
     const ConstraintsDescription & constraints_,
     const Context & context_)
     : IStorage(table_id_)
     , remote_table_name(remote_table_name_)
     , global_context(context_)
-    , connection(std::move(connection_))
+    , connection_pool(std::move(connection_pool_))
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
@@ -84,7 +84,7 @@ Pipe StoragePostgreSQL::read(
     }
 
     return Pipe(std::make_shared<SourceFromInputStream>(
-            std::make_shared<PostgreSQLBlockInputStream>(connection->conn(), query, sample_block, max_block_size_)));
+            std::make_shared<PostgreSQLBlockInputStream>(connection_pool, query, sample_block, max_block_size_)));
 }
 
 
@@ -93,10 +93,11 @@ class PostgreSQLBlockOutputStream : public IBlockOutputStream
 public:
     explicit PostgreSQLBlockOutputStream(
         const StorageMetadataPtr & metadata_snapshot_,
-        ConnectionPtr connection_,
+        PostgreSQLConnectionPoolPtr connection_pool_,
         const std::string & remote_table_name_)
         : metadata_snapshot(metadata_snapshot_)
-        , connection(connection_)
+        , connection_pool(connection_pool_)
+        , connection(connection_pool->get())
         , remote_table_name(remote_table_name_)
     {
     }
@@ -162,6 +163,9 @@ public:
             stream_inserter->complete();
             work->commit();
         }
+
+        if (connection->is_open())
+            connection_pool->put(connection);
     }
 
 
@@ -272,7 +276,8 @@ public:
 
 private:
     StorageMetadataPtr metadata_snapshot;
-    ConnectionPtr connection;
+    PostgreSQLConnectionPoolPtr connection_pool;
+    PostgreSQLConnection::ConnectionPtr connection;
     std::string remote_table_name;
 
     std::unique_ptr<pqxx::work> work;
@@ -283,7 +288,7 @@ private:
 BlockOutputStreamPtr StoragePostgreSQL::write(
         const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, const Context & /* context */)
 {
-    return std::make_shared<PostgreSQLBlockOutputStream>(metadata_snapshot, connection->conn(), remote_table_name);
+    return std::make_shared<PostgreSQLBlockOutputStream>(metadata_snapshot, connection_pool, remote_table_name);
 }
 
 
@@ -304,7 +309,7 @@ void registerStoragePostgreSQL(StorageFactory & factory)
         auto parsed_host_port = parseAddress(engine_args[0]->as<ASTLiteral &>().value.safeGet<String>(), 5432);
         const String & remote_table = engine_args[2]->as<ASTLiteral &>().value.safeGet<String>();
 
-        auto connection = std::make_shared<PostgreSQLConnection>(
+        auto connection_pool = std::make_shared<PostgreSQLConnectionPool>(
             engine_args[1]->as<ASTLiteral &>().value.safeGet<String>(),
             parsed_host_port.first,
             parsed_host_port.second,
@@ -312,7 +317,7 @@ void registerStoragePostgreSQL(StorageFactory & factory)
             engine_args[4]->as<ASTLiteral &>().value.safeGet<String>());
 
         return StoragePostgreSQL::create(
-            args.table_id, remote_table, connection, args.columns, args.constraints, args.context);
+            args.table_id, remote_table, connection_pool, args.columns, args.constraints, args.context);
     },
     {
         .source_access_type = AccessType::POSTGRES,
