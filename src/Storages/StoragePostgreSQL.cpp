@@ -84,7 +84,7 @@ Pipe StoragePostgreSQL::read(
     }
 
     return Pipe(std::make_shared<SourceFromInputStream>(
-            std::make_shared<PostgreSQLBlockInputStream>(connection_pool, query, sample_block, max_block_size_)));
+            std::make_shared<PostgreSQLBlockInputStream>(connection_pool->get(), query, sample_block, max_block_size_)));
 }
 
 
@@ -93,11 +93,10 @@ class PostgreSQLBlockOutputStream : public IBlockOutputStream
 public:
     explicit PostgreSQLBlockOutputStream(
         const StorageMetadataPtr & metadata_snapshot_,
-        PostgreSQLConnectionPoolPtr connection_pool_,
+        WrappedPostgreSQLConnection connection_,
         const std::string & remote_table_name_)
         : metadata_snapshot(metadata_snapshot_)
-        , connection_pool(connection_pool_)
-        , connection(connection_pool->get())
+        , connection(connection_)
         , remote_table_name(remote_table_name_)
     {
     }
@@ -163,9 +162,6 @@ public:
             stream_inserter->complete();
             work->commit();
         }
-
-        if (connection->is_open())
-            connection_pool->put(connection);
     }
 
 
@@ -276,8 +272,7 @@ public:
 
 private:
     StorageMetadataPtr metadata_snapshot;
-    PostgreSQLConnectionPoolPtr connection_pool;
-    PostgreSQLConnection::ConnectionPtr connection;
+    WrappedPostgreSQLConnection connection;
     std::string remote_table_name;
 
     std::unique_ptr<pqxx::work> work;
@@ -288,7 +283,7 @@ private:
 BlockOutputStreamPtr StoragePostgreSQL::write(
         const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, const Context & /* context */)
 {
-    return std::make_shared<PostgreSQLBlockOutputStream>(metadata_snapshot, connection_pool, remote_table_name);
+    return std::make_shared<PostgreSQLBlockOutputStream>(metadata_snapshot, connection_pool->get(), remote_table_name);
 }
 
 

@@ -22,7 +22,7 @@ public:
 
     PostgreSQLReplicaConnection(const PostgreSQLReplicaConnection & other);
 
-    PostgreSQLConnectionPoolPtr get();
+    WrappedPostgreSQLConnection get();
 
 
 private:

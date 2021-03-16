@@ -95,7 +95,6 @@ std::unordered_set<std::string> DatabasePostgreSQL::fetchTablesList() const
     for (auto table_name : tx.stream<std::string>(query))
         tables.insert(std::get<0>(table_name));
 
-    connection_pool->put(connection);
     return tables;
 }
 
@@ -131,7 +130,6 @@ bool DatabasePostgreSQL::checkPostgresTable(const String & table_name) const
         throw;
     }
 
-    connection_pool->put(connection);
     return true;
 }
 
@@ -168,7 +166,6 @@ StoragePtr DatabasePostgreSQL::fetchTable(const String & table_name, const Conte
         auto use_nulls = context.getSettingsRef().external_table_functions_use_nulls;
         auto connection = connection_pool->get();
         auto columns = fetchPostgreSQLTableStructure(connection, table_name, use_nulls);
-        connection_pool->put(connection);
 
         if (!columns)
             return StoragePtr{};
