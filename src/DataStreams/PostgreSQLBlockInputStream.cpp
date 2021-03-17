@@ -117,8 +117,116 @@ void PostgreSQLBlockInputStream<T>::readSuffix()
     {
         stream->complete();
 
+<<<<<<< HEAD
         if (auto_commit)
             tx->commit();
+=======
+void PostgreSQLBlockInputStream::insertValue(IColumn & column, std::string_view value,
+        const ExternalResultDescription::ValueType type, const DataTypePtr data_type, size_t idx)
+{
+    switch (type)
+    {
+        case ValueType::vtUInt8:
+            assert_cast<ColumnUInt8 &>(column).insertValue(pqxx::from_string<uint16_t>(value));
+            break;
+        case ValueType::vtUInt16:
+            assert_cast<ColumnUInt16 &>(column).insertValue(pqxx::from_string<uint16_t>(value));
+            break;
+        case ValueType::vtUInt32:
+            assert_cast<ColumnUInt32 &>(column).insertValue(pqxx::from_string<uint32_t>(value));
+            break;
+        case ValueType::vtUInt64:
+            assert_cast<ColumnUInt64 &>(column).insertValue(pqxx::from_string<uint64_t>(value));
+            break;
+        case ValueType::vtInt8:
+            assert_cast<ColumnInt8 &>(column).insertValue(pqxx::from_string<int16_t>(value));
+            break;
+        case ValueType::vtInt16:
+            assert_cast<ColumnInt16 &>(column).insertValue(pqxx::from_string<int16_t>(value));
+            break;
+        case ValueType::vtInt32:
+            assert_cast<ColumnInt32 &>(column).insertValue(pqxx::from_string<int32_t>(value));
+            break;
+        case ValueType::vtInt64:
+            assert_cast<ColumnInt64 &>(column).insertValue(pqxx::from_string<int64_t>(value));
+            break;
+        case ValueType::vtFloat32:
+            assert_cast<ColumnFloat32 &>(column).insertValue(pqxx::from_string<float>(value));
+            break;
+        case ValueType::vtFloat64:
+            assert_cast<ColumnFloat64 &>(column).insertValue(pqxx::from_string<double>(value));
+            break;
+        case ValueType::vtFixedString:[[fallthrough]];
+        case ValueType::vtString:
+            assert_cast<ColumnString &>(column).insertData(value.data(), value.size());
+            break;
+        case ValueType::vtUUID:
+            assert_cast<ColumnUInt128 &>(column).insert(parse<UUID>(value.data(), value.size()));
+            break;
+        case ValueType::vtDate:
+            assert_cast<ColumnUInt16 &>(column).insertValue(UInt16{LocalDate{std::string(value)}.getDayNum()});
+            break;
+        case ValueType::vtDateTime:
+        {
+            ReadBufferFromString in(value);
+            time_t time = 0;
+            readDateTimeText(time, in);
+            if (time < 0)
+                time = 0;
+            assert_cast<ColumnUInt32 &>(column).insertValue(time);
+            break;
+        }
+        case ValueType::vtDateTime64:[[fallthrough]];
+        case ValueType::vtDecimal32: [[fallthrough]];
+        case ValueType::vtDecimal64: [[fallthrough]];
+        case ValueType::vtDecimal128: [[fallthrough]];
+        case ValueType::vtDecimal256:
+        {
+            ReadBufferFromString istr(value);
+            data_type->deserializeAsWholeText(column, istr, FormatSettings{});
+            break;
+        }
+        case ValueType::vtArray:
+        {
+            pqxx::array_parser parser{value};
+            std::pair<pqxx::array_parser::juncture, std::string> parsed = parser.get_next();
+
+            size_t dimension = 0, max_dimension = 0, expected_dimensions = array_info[idx].num_dimensions;
+            const auto parse_value = array_info[idx].pqxx_parser;
+            std::vector<std::vector<Field>> dimensions(expected_dimensions + 1);
+
+            while (parsed.first != pqxx::array_parser::juncture::done)
+            {
+                if ((parsed.first == pqxx::array_parser::juncture::row_start) && (++dimension > expected_dimensions))
+                    throw Exception("Got more dimensions than expected", ErrorCodes::BAD_ARGUMENTS);
+
+                else if (parsed.first == pqxx::array_parser::juncture::string_value)
+                    dimensions[dimension].emplace_back(parse_value(parsed.second));
+
+                else if (parsed.first == pqxx::array_parser::juncture::null_value)
+                    dimensions[dimension].emplace_back(array_info[idx].default_value);
+
+                else if (parsed.first == pqxx::array_parser::juncture::row_end)
+                {
+                    max_dimension = std::max(max_dimension, dimension);
+
+                    if (--dimension == 0)
+                        break;
+
+                    dimensions[dimension].emplace_back(Array(dimensions[dimension + 1].begin(), dimensions[dimension + 1].end()));
+                    dimensions[dimension + 1].clear();
+                }
+
+                parsed = parser.get_next();
+            }
+
+            if (max_dimension < expected_dimensions)
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "Got less dimensions than expected. ({} instead of {})", max_dimension, expected_dimensions);
+
+            assert_cast<ColumnArray &>(column).insert(Array(dimensions[1].begin(), dimensions[1].end()));
+            break;
+        }
     }
 }
 
