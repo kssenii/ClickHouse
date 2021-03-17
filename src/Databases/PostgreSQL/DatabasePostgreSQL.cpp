@@ -16,6 +16,7 @@
 #include <Poco/File.h>
 #include <Databases/PostgreSQL/fetchPostgreSQLTableStructure.h>
 #include <Storages/PostgreSQL/PostgreSQLConnectionPool.h>
+#include <Common/quoteString.h>
 
 
 namespace DB
@@ -164,8 +165,7 @@ StoragePtr DatabasePostgreSQL::fetchTable(const String & table_name, const Conte
             return StoragePtr{};
 
         auto use_nulls = context.getSettingsRef().external_table_functions_use_nulls;
-        auto connection = connection_pool->get();
-        auto columns = fetchPostgreSQLTableStructure(connection, table_name, use_nulls);
+        auto columns = fetchPostgreSQLTableStructure(connection_pool->get(), table_name, use_nulls);
 
         if (!columns)
             return StoragePtr{};

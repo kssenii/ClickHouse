@@ -6,6 +6,7 @@
 #include "PostgreSQLConnection.h"
 #include <common/logger_useful.h>
 #include <IO/Operators.h>
+#include <common/logger_useful.h>
 
 
 namespace DB

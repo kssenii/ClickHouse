@@ -1,6 +1,10 @@
 #include "PostgreSQLReplicaConnection.h"
+<<<<<<< HEAD
 #include "PostgreSQLConnection.h"
 #include <Common/Exception.h>
+=======
+#include <Poco/Util/AbstractConfiguration.h>
+>>>>>>> 2303f1788cdc9bbc98cb15083dc3130819a7965e
 
 
 namespace DB
