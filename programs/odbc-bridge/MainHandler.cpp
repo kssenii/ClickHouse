@@ -22,6 +22,8 @@
 #include <mutex>
 #include <memory>
 
+#include <nanodbc/nanodbc.h>
+
 
 #if USE_ODBC
 #include <Poco/Data/ODBC/SessionImpl.h>
@@ -136,6 +138,7 @@ void ODBCHandler::handleRequest(HTTPServerRequest & request, HTTPServerResponse 
 
     std::string connection_string = params.get("connection_string");
     LOG_TRACE(log, "Connection string: '{}'", connection_string);
+    auto connection = std::make_shared<nanodbc::connection>(connection_string);
 
     WriteBufferFromHTTPServerResponse out(response, request.getMethod() == Poco::Net::HTTPRequest::HTTP_HEAD, keep_alive_timeout);
 
@@ -177,8 +180,7 @@ void ODBCHandler::handleRequest(HTTPServerRequest & request, HTTPServerResponse 
             LOG_TRACE(log, "Query: {}", query);
 
             BlockOutputStreamPtr writer = FormatFactory::instance().getOutputStreamParallelIfPossible(format, out, *sample_block, context);
-            auto pool = getPool(connection_string);
-            ODBCBlockInputStream inp(pool->get(), query, *sample_block, max_block_size);
+            ODBCBlockInputStream inp(connection, query, *sample_block, max_block_size);
             copyData(inp, *writer);
         }
     }

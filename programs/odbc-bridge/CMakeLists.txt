@@ -27,6 +27,7 @@ target_link_libraries(clickhouse-odbc-bridge PRIVATE
     clickhouse_parsers
     Poco::Data
     Poco::Data::ODBC
+    nanodbc
 )
 
 set_target_properties(clickhouse-odbc-bridge PROPERTIES RUNTIME_OUTPUT_DIRECTORY ..)
