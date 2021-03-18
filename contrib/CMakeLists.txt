@@ -314,6 +314,11 @@ if (USE_LIBPQXX)
     add_subdirectory (libpqxx-cmake)
 endif()
 
+if (USE_NANODBC)
+    add_subdirectory (iodbc-cmake)
+    add_subdirectory (nanodbc-cmake)
+endif()
+
 if (USE_NURAFT)
   add_subdirectory(nuraft-cmake)
 endif()

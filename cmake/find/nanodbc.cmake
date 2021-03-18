@@ -1,0 +1,26 @@
+option(ENABLE_NANODBC "Enalbe nanodbc" ${ENABLE_LIBRARIES})
+
+if (NOT ENABLE_NANODBC)
+    return()
+endif()
+
+if (NOT EXISTS "${ClickHouse_SOURCE_DIR}/contrib/nanodbc/CMakeLists.txt")
+    message (WARNING "submodule contrib/nanodbc is missing. to fix try run: \n git submodule update --init --recursive")
+    message (${RECONFIGURE_MESSAGE_LEVEL} "Can't find internal nanodbc library")
+    set (USE_NANODBC 0)
+    return()
+endif()
+
+if (NOT EXISTS "${ClickHouse_SOURCE_DIR}/contrib/iODBC/include")
+    message (ERROR "submodule contrib/iODBC is missing. to fix try run: \n git submodule update --init --recursive")
+    message (${RECONFIGURE_MESSAGE_LEVEL} "Can't find internal iODBC needed for nanodbc")
+    set (USE_NANODBCX 0)
+    return()
+endif()
+
+set (USE_NANODBC 1)
+set (NANODBC_LIBRARY nanodbc)
+set (IODBC_LIBRARY iodbc)
+set (NANODBC_INCLUDE_DIR "${ClickHouse_SOURCE_DIR}/contrib/nanodbc/nanodbce")
+message (STATUS "Using nanodbc=${USE_NANODBC}: ${NANODBC_INCLUDE_DIR} : ${NANODBC_LIBRARY}")
+message (STATUS "Using iodbc: ${IOBDC_INCLUDE_DIR} : ${IODBC_LIBRARY}")
