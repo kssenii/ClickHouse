@@ -3,9 +3,6 @@
 #include <string>
 #include <Core/Block.h>
 #include <DataStreams/IBlockInputStream.h>
-#include <Poco/Data/RecordSet.h>
-#include <Poco/Data/Session.h>
-#include <Poco/Data/Statement.h>
 #include <Core/ExternalResultDescription.h>
 #include <nanodbc/nanodbc.h>
 
@@ -16,8 +13,7 @@ namespace DB
 class ODBCBlockInputStream final : public IBlockInputStream
 {
 public:
-    using ConnectionPtr = std::shared_ptr<nanodbc::connection>;
-    ODBCBlockInputStream(ConnectionPtr connection_, const std::string & query_str, const Block & sample_block, const UInt64 max_block_size_);
+    ODBCBlockInputStream(nanodbc::connection & connection_, const std::string & query_str, const Block & sample_block, const UInt64 max_block_size_);
 
     String getName() const override { return "ODBC"; }
 
@@ -40,7 +36,7 @@ private:
     const UInt64 max_block_size;
     ExternalResultDescription description;
 
-    ConnectionPtr connection;
+    nanodbc::connection & connection;
     nanodbc::result result;
     String query;
     bool finished = false;

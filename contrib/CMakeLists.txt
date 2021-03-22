@@ -315,7 +315,6 @@ if (USE_LIBPQXX)
 endif()
 
 if (USE_NANODBC)
-    add_subdirectory (iodbc-cmake)
     add_subdirectory (nanodbc-cmake)
 endif()
 

@@ -224,6 +224,3 @@
 [submodule "contrib/nanodbc"]
 	path = contrib/nanodbc
 	url = https://github.com/nanodbc/nanodbc
-[submodule "contrib/iODBC"]
-	path = contrib/iODBC
-	url = https://github.com/openlink/iODBC

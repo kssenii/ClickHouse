@@ -2,33 +2,28 @@
 
 #if USE_ODBC
 
-#    include <Server/HTTP/HTMLForm.h>
-#    include <Server/HTTP/WriteBufferFromHTTPServerResponse.h>
-#    include <IO/WriteHelpers.h>
-#    include <Poco/Data/ODBC/ODBCException.h>
-#    include <Poco/Data/ODBC/SessionImpl.h>
-#    include <Poco/Data/ODBC/Utility.h>
-#    include <Poco/Net/HTTPServerRequest.h>
-#    include <Poco/Net/HTTPServerResponse.h>
-#    include <common/logger_useful.h>
-#    include "validateODBCConnectionString.h"
+#include <Server/HTTP/HTMLForm.h>
+#include <Server/HTTP/WriteBufferFromHTTPServerResponse.h>
+#include <IO/WriteHelpers.h>
+#include <Poco/Net/HTTPServerRequest.h>
+#include <Poco/Net/HTTPServerResponse.h>
+#include <common/logger_useful.h>
+#include "validateODBCConnectionString.h"
 
-#    define POCO_SQL_ODBC_CLASS Poco::Data::ODBC
+#include <nanodbc/nanodbc.h>
+#include <sql.h>
+#include <sqlext.h>
+
 
 namespace DB
 {
 namespace
 {
-    bool isSchemaAllowed(SQLHDBC hdbc)
+    bool isSchemaAllowed(nanodbc::connection & connection)
     {
-        SQLUINTEGER value;
-        SQLSMALLINT value_length = sizeof(value);
-        SQLRETURN r = POCO_SQL_ODBC_CLASS::SQLGetInfo(hdbc, SQL_SCHEMA_USAGE, &value, sizeof(value), &value_length);
-
-        if (POCO_SQL_ODBC_CLASS::Utility::isError(r))
-            throw POCO_SQL_ODBC_CLASS::ConnectionException(hdbc);
-
-        return value != 0;
+        uint32_t result = connection.get_info<uint32_t>(SQL_SCHEMA_USAGE);
+        LOG_TRACE(&Poco::Logger::get("kssenii"), "KSSENII schema usage RES: {}", result);
+        return result != 0;
     }
 }
 
@@ -55,10 +50,11 @@ void SchemaAllowedHandler::handleRequest(HTTPServerRequest & request, HTTPServer
     try
     {
         std::string connection_string = params.get("connection_string");
-        POCO_SQL_ODBC_CLASS::SessionImpl session(validateODBCConnectionString(connection_string), DBMS_DEFAULT_CONNECT_TIMEOUT_SEC);
-        SQLHDBC hdbc = session.dbc().handle();
+        nanodbc::connection connection(validateODBCConnectionString(connection_string));
 
-        bool result = isSchemaAllowed(hdbc);
+        //SQLHDBC hdbc = session.dbc().handle();
+
+        bool result = isSchemaAllowed(connection);
 
         WriteBufferFromHTTPServerResponse out(response, request.getMethod() == Poco::Net::HTTPRequest::HTTP_HEAD, keep_alive_timeout);
         try

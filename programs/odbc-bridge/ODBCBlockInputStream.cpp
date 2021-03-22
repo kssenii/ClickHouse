@@ -21,14 +21,14 @@ namespace ErrorCodes
 
 
 ODBCBlockInputStream::ODBCBlockInputStream(
-    ConnectionPtr connection_, const std::string & query_str, const Block & sample_block, const UInt64 max_block_size_)
+    nanodbc::connection & connection_, const std::string & query_str, const Block & sample_block, const UInt64 max_block_size_)
     : log(&Poco::Logger::get("ODBCBlockInputStream"))
     , max_block_size{max_block_size_}
-    , connection(std::move(connection_))
+    , connection(connection_)
     , query(query_str)
 {
     description.init(sample_block);
-    result = execute(*connection, NANODBC_TEXT(query));
+    result = execute(connection, NANODBC_TEXT(query));
 }
 
 
@@ -78,7 +78,9 @@ void ODBCBlockInputStream::insertValue(
 {
     switch (type)
     {
-        case ValueType::vtUInt8:[[fallthrough]];
+        case ValueType::vtUInt8:
+            assert_cast<ColumnUInt8 &>(column).insertValue(row.get<uint16_t>(idx));
+            break;
         case ValueType::vtUInt16:
             assert_cast<ColumnUInt16 &>(column).insertValue(row.get<uint16_t>(idx));
             break;
@@ -88,7 +90,9 @@ void ODBCBlockInputStream::insertValue(
         case ValueType::vtUInt64:
             assert_cast<ColumnUInt64 &>(column).insertValue(row.get<uint64_t>(idx));
             break;
-        case ValueType::vtInt8:[[fallthrough]];
+        case ValueType::vtInt8:
+            assert_cast<ColumnInt8 &>(column).insertValue(row.get<int16_t>(idx));
+            break;
         case ValueType::vtInt16:
             assert_cast<ColumnInt16 &>(column).insertValue(row.get<int16_t>(idx));
             break;

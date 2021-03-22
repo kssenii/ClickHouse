@@ -11,16 +11,18 @@ if (NOT EXISTS "${ClickHouse_SOURCE_DIR}/contrib/nanodbc/CMakeLists.txt")
     return()
 endif()
 
-if (NOT EXISTS "${ClickHouse_SOURCE_DIR}/contrib/iODBC/include")
-    message (ERROR "submodule contrib/iODBC is missing. to fix try run: \n git submodule update --init --recursive")
-    message (${RECONFIGURE_MESSAGE_LEVEL} "Can't find internal iODBC needed for nanodbc")
+if (NOT EXISTS "${ClickHouse_SOURCE_DIR}/contrib/unixodbc/include")
+    message (ERROR "submodule contrib/unixodbc is missing. to fix try run: \n git submodule update --init --recursive")
+    message (${RECONFIGURE_MESSAGE_LEVEL} "Can't find internal unixodbc needed for nanodbc")
     set (USE_NANODBCX 0)
     return()
 endif()
 
 set (USE_NANODBC 1)
+
 set (NANODBC_LIBRARY nanodbc)
-set (IODBC_LIBRARY iodbc)
+
 set (NANODBC_INCLUDE_DIR "${ClickHouse_SOURCE_DIR}/contrib/nanodbc/nanodbce")
 message (STATUS "Using nanodbc=${USE_NANODBC}: ${NANODBC_INCLUDE_DIR} : ${NANODBC_LIBRARY}")
-message (STATUS "Using iodbc: ${IOBDC_INCLUDE_DIR} : ${IODBC_LIBRARY}")
+
+message (STATUS "Using unixodbc")
