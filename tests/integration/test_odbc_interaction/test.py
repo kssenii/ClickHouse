@@ -381,5 +381,73 @@ def test_odbc_postgres_date_data_type(started_cluster):
     expected = '1\t2020-12-01\n2\t2020-12-02\n3\t2020-12-03\n'
     result = node1.query('SELECT * FROM test_date');
     assert(result == expected)
+    cursor.execute("DROP TABLE IF EXISTS clickhouse.test_date")
+    node1.query("DROP TABLE IF EXISTS test_date")
 
+
+def test_odbc_postgres_conversions(started_cluster):
+    conn = get_postgres_conn()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        '''CREATE TABLE IF NOT EXISTS clickhouse.test_types (
+        a smallint, b integer, c bigint, d real, e double precision, f serial, g bigserial,
+        h timestamp)''')
+
+    node1.query('''
+        INSERT INTO TABLE FUNCTION
+        odbc('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_types')
+        VALUES (-32768, -2147483648, -9223372036854775808, 1.12345, 1.1234567890, 2147483647, 9223372036854775807, '2000-05-12 12:12:12')''')
+
+    result = node1.query('''
+        SELECT a, b, c, d, e, f, g, h
+        FROM odbc('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_types')
+        ''')
+
+    assert(result == '-32768\t-2147483648\t-9223372036854775808\t1.12345\t1.123456789\t2147483647\t9223372036854775807\t2000-05-12 12:12:12\n')
+    cursor.execute("DROP TABLE IF EXISTS clickhouse.test_types")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS clickhouse.test_types (column1 Timestamp, column2 Numeric)""")
+
+    node1.query(
+        '''
+        CREATE TABLE test_types (column1 DateTime64, column2 Decimal(5, 1))
+        ENGINE=ODBC('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_types')''')
+
+    node1.query(
+        """INSERT INTO test_types
+        SELECT toDateTime64('2019-01-01 00:00:00', 3, 'Europe/Moscow'), toDecimal32(1.1, 1)""")
+
+    expected = node1.query("SELECT toDateTime64('2019-01-01 00:00:00', 3, 'Europe/Moscow'), toDecimal32(1.1, 1)")
+    result = node1.query("SELECT * FROM test_types")
+    print(result)
+    cursor.execute("DROP TABLE IF EXISTS clickhouse.test_types")
+    assert(result == expected)
+
+
+def test_odbc_cyrillic_with_varchar(started_cluster):
+    conn = get_postgres_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("DROP TABLE IF EXISTS clickhouse.test_cyrillic")
+    cursor.execute("CREATE TABLE clickhouse.test_cyrillic (name varchar(11))")
+
+    node1.query('''
+        CREATE TABLE test_cyrillic (name String)
+        ENGINE = ODBC('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_cyrillic')''')
+
+    cursor.execute("INSERT INTO clickhouse.test_cyrillic VALUES ('A-nice-word')")
+    cursor.execute("INSERT INTO clickhouse.test_cyrillic VALUES ('Красивенько')")
+
+    result = node1.query(''' SELECT * FROM test_cyrillic ORDER BY name''')
+
+    assert(result == 'A-nice-word\nКрасивенько\n')
+
+    node1.query(''' INSERT INTO TABLE FUNCTION
+        odbc('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_cyrillic')
+        VALUES ('Красивенько')''')
+
+    result = node1.query('''
+        SELECT name FROM odbc('DSN=postgresql_odbc; Servername=postgre-sql.local', 'clickhouse', 'test_cyrillic') ''')
+    assert(result == 'A-nice-word\nКрасивенько\nКрасивенько\n')
 
