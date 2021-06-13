@@ -21,7 +21,7 @@ namespace ErrorCodes
 
 /// Helper class to collect paths into chunks of maximum size.
 /// For diskS3 it is Aws::vector<ObjectIdentifier>, for diskHDFS it is std::vector<std::string>.
-/// For DiskWEBServer not implemented.
+/// For diskWEBServer not implemented.
 class RemoteFSPathKeeper
 {
 public:
@@ -39,7 +39,7 @@ using RemoteFSPathKeeperPtr = std::shared_ptr<RemoteFSPathKeeper>;
 
 
 /// Base Disk class for remote FS's, which are not posix-compatible.
-/// Used for s3, hdfs, web-server.
+/// Used to implement disks over s3, hdfs, web-server.
 class IDiskRemote : public IDisk
 {
 friend class DiskRemoteReservation;
@@ -80,7 +80,7 @@ public:
 
     bool isFile(const String & path) const override;
 
-    size_t getFileSize(const String & path) const final override;
+    size_t getFileSize(const String & path) const override;
 
     void listFiles(const String & path, std::vector<String> & file_names) override;
 
@@ -127,7 +127,7 @@ public:
     /// Overriden by disks s3 and hdfs.
     virtual RemoteFSPathKeeperPtr createFSPathKeeper() const
     {
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Disk {} does not support storage keeper", getName());
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Disk {} does not support FS paths keeper", getName());
     }
 
     /// Create part
