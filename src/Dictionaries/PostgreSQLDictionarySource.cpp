@@ -192,7 +192,8 @@ void registerDictionarySourcePostgreSQL(DictionarySourceFactory & factory)
         auto pool = std::make_shared<postgres::PoolWithFailover>(
                     config, settings_config_prefix,
                     context->getSettingsRef().postgresql_connection_pool_size,
-                    context->getSettingsRef().postgresql_connection_pool_wait_timeout);
+                    context->getSettingsRef().postgresql_connection_pool_wait_timeout,
+                    context->getSettingsRef().postgresql_idle_connection_timeout);
 
         PostgreSQLDictionarySource::Configuration configuration
         {

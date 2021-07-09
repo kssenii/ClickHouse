@@ -110,21 +110,11 @@ public:
         auto & pool = factory[connection_string];
 
         nanodbc::ConnectionPtr connection;
-        auto connection_available = pool->tryBorrowObject(connection, []() { return nullptr; }, ODBC_POOL_WAIT_TIMEOUT);
+        auto new_connection = []() { connection = std::make_unique<nanodbc::connection>(connection_string, ODBC_CONNECT_TIMEOUT); };
+        auto connection_available = pool->tryBorrowObject(connection, new_connection, ODBC_POOL_WAIT_TIMEOUT);
 
         if (!connection_available)
             throw Exception("Unable to fetch connection within the timeout", ErrorCodes::NO_FREE_CONNECTION);
-
-        try
-        {
-            if (!connection)
-                connection = std::make_unique<nanodbc::connection>(connection_string, ODBC_CONNECT_TIMEOUT);
-        }
-        catch (...)
-        {
-            pool->returnObject(std::move(connection));
-            throw;
-        }
 
         return std::make_unique<nanodbc::ConnectionHolder>(factory[connection_string], std::move(connection), connection_string);
     }

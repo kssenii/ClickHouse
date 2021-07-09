@@ -258,7 +258,8 @@ DatabasePtr DatabaseFactory::getImpl(const ASTCreateQuery & create, const String
             addresses,
             username, password,
             context->getSettingsRef().postgresql_connection_pool_size,
-            context->getSettingsRef().postgresql_connection_pool_wait_timeout);
+            context->getSettingsRef().postgresql_connection_pool_wait_timeout,
+            context->getSettingsRef().postgresql_idle_connection_timeout);
 
         return std::make_shared<DatabasePostgreSQL>(
             context, metadata_path, engine_define, database_name, postgres_database_name, connection_pool, use_table_cache);

@@ -13,5 +13,5 @@ namespace pqxx
 
 namespace postgres
 {
-ConnectionInfo formatConnectionString(String dbname, String host, UInt16 port, String user, String password);
+ConnectionInfo formatConnectionString(String dbname, String host, UInt16 port, String user, String password, size_t idle_connection_timeout = 200);
 }
