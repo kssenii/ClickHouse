@@ -332,7 +332,8 @@ void registerStoragePostgreSQL(StorageFactory & factory)
             username,
             password,
             args.getContext()->getSettingsRef().postgresql_connection_pool_size,
-            args.getContext()->getSettingsRef().postgresql_connection_pool_wait_timeout);
+            args.getContext()->getSettingsRef().postgresql_connection_pool_wait_timeout,
+            args.getContext()->getSettingsRef().postgresql_idle_connection_timeout);
 
         return StoragePostgreSQL::create(
             args.table_id,

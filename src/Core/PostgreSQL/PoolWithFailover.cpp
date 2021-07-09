@@ -2,6 +2,8 @@
 #include "Utils.h"
 #include <Common/parseRemoteDescription.h>
 #include <Common/Exception.h>
+#include <IO/WriteBufferFromString.h>
+#include <IO/Operators.h>
 
 namespace DB
 {
@@ -81,6 +83,7 @@ PoolWithFailover::PoolWithFailover(
 ConnectionHolderPtr PoolWithFailover::get()
 {
     std::lock_guard lock(mutex);
+    DB::WriteBufferFromOwnString error_log;
 
     for (size_t try_idx = 0; try_idx < max_tries; ++try_idx)
     {
@@ -91,8 +94,23 @@ ConnectionHolderPtr PoolWithFailover::get()
             {
                 auto & replica = replicas[i];
 
+                auto new_connection = [&]()
+                {
+                    ConnectionPtr connection;
+                    try
+                    {
+                        connection = std::make_unique<pqxx::connection>(replica.connection_string);
+                        LOG_DEBUG(log, "New connection to {}:{}", connection->hostname(), connection->port());
+                    }
+                    catch (const pqxx::broken_connection & pqxx_error)
+                    {
+                        error_log << "Connection error: " << pqxx_error.what() << '\n';
+                    }
+                    return connection;
+                };
+
                 ConnectionPtr connection;
-                auto connection_available = replica.pool->tryBorrowObject(connection, []() { return nullptr; }, pool_wait_timeout);
+                auto connection_available = replica.pool->tryBorrowObject(connection, new_connection, pool_wait_timeout);
 
                 if (!connection_available)
                 {
@@ -100,27 +118,8 @@ ConnectionHolderPtr PoolWithFailover::get()
                     continue;
                 }
 
-                try
-                {
-                    /// Create a new connection or reopen an old connection if it became invalid.
-                    if (!connection || !connection->is_open())
-                    {
-                        connection = std::make_unique<pqxx::connection>(replica.connection_string);
-                        LOG_DEBUG(log, "New connection to {}:{}", connection->hostname(), connection->port());
-                    }
-                }
-                catch (const pqxx::broken_connection & pqxx_error)
-                {
-                    LOG_ERROR(log, "Connection error: {}", pqxx_error.what());
-
-                    replica.pool->returnObject(std::move(connection));
-                    continue;
-                }
-                catch (...)
-                {
-                    replica.pool->returnObject(std::move(connection));
-                    throw;
-                }
+                if (!connection->is_open())
+                    connection = std::make_unique<pqxx::connection>(replica.connection_string);
 
                 auto connection_holder = std::make_unique<ConnectionHolder>(replica.pool, std::move(connection));
 
@@ -133,6 +132,6 @@ ConnectionHolderPtr PoolWithFailover::get()
         }
     }
 
-    throw DB::Exception(DB::ErrorCodes::POSTGRESQL_CONNECTION_FAILURE, "Unable to connect to any of the replicas");
+    throw DB::Exception(DB::ErrorCodes::POSTGRESQL_CONNECTION_FAILURE, "Unable to establish connection: {}", error_log.str());
 }
 }
