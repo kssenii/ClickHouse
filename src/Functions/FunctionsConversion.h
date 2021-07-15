@@ -600,6 +600,17 @@ struct FormatImpl<DataTypeDate>
 };
 
 template <>
+struct FormatImpl<DataTypeDate32>
+{
+    template <typename ReturnType = void>
+    static ReturnType execute(const DataTypeDate::FieldType x, WriteBuffer & wb, const DataTypeDate *, const DateLUTImpl *)
+    {
+        writeDateText(ExtendedDayNum(x), wb);
+        return ReturnType(true);
+    }
+};
+
+template <>
 struct FormatImpl<DataTypeDateTime>
 {
     template <typename ReturnType = void>
@@ -955,6 +966,8 @@ struct ConvertThroughParsing
 
         /// Special case, that allows to parse string with DateTime as Date.
         if (std::is_same_v<ToDataType, DataTypeDate> && (in.buffer().size()) == strlen("YYYY-MM-DD hh:mm:ss"))
+            return true;
+        if (std::is_same_v<ToDataType, DataTypeDate32> && (in.buffer().size()) == strlen("YYYY-MM-DD hh:mm:ss"))
             return true;
 
         return false;
@@ -1420,6 +1433,8 @@ public:
             || std::is_same_v<Name, NameToUnixTimestamp>
             // toDate(value[, timezone : String])
             || std::is_same_v<ToDataType, DataTypeDate> // TODO: shall we allow timestamp argument for toDate? DateTime knows nothing about timezones and this argument is ignored below.
+            // toDate(value[, timezone : String])
+            || std::is_same_v<ToDataType, DataTypeDate32>
             // toDateTime(value[, timezone: String])
             || std::is_same_v<ToDataType, DataTypeDateTime>
             // toDateTime64(value, scale : Integer[, timezone: String])
@@ -2110,6 +2125,7 @@ template <> struct FunctionTo<DataTypeInt256> { using Type = FunctionToInt256; }
 template <> struct FunctionTo<DataTypeFloat32> { using Type = FunctionToFloat32; };
 template <> struct FunctionTo<DataTypeFloat64> { using Type = FunctionToFloat64; };
 template <> struct FunctionTo<DataTypeDate> { using Type = FunctionToDate; };
+template <> struct FunctionTo<DataTypeDate32> { using Type = FunctionToDate32; };
 template <> struct FunctionTo<DataTypeDateTime> { using Type = FunctionToDateTime; };
 template <> struct FunctionTo<DataTypeDateTime64> { using Type = FunctionToDateTime64; };
 template <> struct FunctionTo<DataTypeUUID> { using Type = FunctionToUUID; };
@@ -3164,6 +3180,7 @@ private:
                 std::is_same_v<ToDataType, DataTypeFloat32> ||
                 std::is_same_v<ToDataType, DataTypeFloat64> ||
                 std::is_same_v<ToDataType, DataTypeDate> ||
+                std::is_same_v<ToDataType, DataTypeDate32> ||
                 std::is_same_v<ToDataType, DataTypeDateTime> ||
                 std::is_same_v<ToDataType, DataTypeUUID>)
             {
@@ -3262,6 +3279,8 @@ public:
         if (const auto * type = checkAndGetDataType<DataTypeFloat64>(to_type))
             return monotonicityForType(type);
         if (const auto * type = checkAndGetDataType<DataTypeDate>(to_type))
+            return monotonicityForType(type);
+        if (const auto * type = checkAndGetDataType<DataTypeDate32>(to_type))
             return monotonicityForType(type);
         if (const auto * type = checkAndGetDataType<DataTypeDateTime>(to_type))
             return monotonicityForType(type);
