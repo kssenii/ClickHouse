@@ -571,8 +571,6 @@ void ClientBase::runNonInteractive()
         processWithFuzzing(text);
     else
         processQueryText(text);
-
-    checkExceptions();
 }
 
 
@@ -598,8 +596,6 @@ int ClientBase::main(const std::vector<std::string> & /*args*/)
     try
     {
         UseSSL use_ssl;
-
-        processConfig();
 
         std::cout << std::fixed << std::setprecision(3);
         std::cerr << std::fixed << std::setprecision(3);

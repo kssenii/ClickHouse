@@ -242,8 +242,8 @@ void LocalServer::executeParsedQueryImpl()
         if (!config().hasOption("ignore-error"))
             throw;
 
-        if (!exception)
-            exception = std::current_exception();
+        if (!local_server_exception)
+            local_server_exception = std::current_exception();
 
         std::cerr << getCurrentExceptionMessage(config().hasOption("stacktrace")) << '\n';
     }
@@ -326,6 +326,8 @@ int LocalServer::mainImpl()
     registerDisks();
     registerFormats();
 
+    processConfig();
+
     /// we can't mutate global_context (can lead to races, as it was already passed to some background threads)
     /// so we can't reuse it safely as a query context and need a copy here
     query_context = Context::createCopy(global_context);
@@ -353,9 +355,16 @@ int LocalServer::mainImpl()
     }
 
     if (is_interactive)
+    {
         runInteractive();
+    }
     else
+    {
         runNonInteractive();
+
+        if (local_server_exception)
+            std::rethrow_exception(local_server_exception);
+    }
 
     global_context->shutdown();
     global_context.reset();

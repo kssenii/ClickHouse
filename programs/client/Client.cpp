@@ -334,6 +334,7 @@ int Client::mainImpl()
     registerFunctions();
     registerAggregateFunctions();
 
+    processConfig();
     connect();
 
     if (is_interactive)
