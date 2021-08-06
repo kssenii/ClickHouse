@@ -3382,41 +3382,46 @@ public:
     }
 };
 
-template<CastType cast_type>
-class CastOverloadResolver : public IFunctionOverloadResolver
+
+/*
+ * CASTInternal does not preserve nullability of the data type,
+ * i.e. CastInternal(toNullable(toInt8(1)) as Int32) will be Int8(1).
+ *
+ * CAST preserves nullability according to setting `cast_keep_nullable`,
+ * i.e. Cast(toNullable(toInt8(1)) as Int32) will be Nullable(Int8(1)) if `cast_keep_nullable` == 1.
+**/
+template<CastType cast_type, bool internal, typename Name>
+class CastOverloadResolverImpl : public IFunctionOverloadResolver
 {
 public:
     using MonotonicityForRange = FunctionCast::MonotonicityForRange;
     using Diagnostic = FunctionCast::Diagnostic;
 
-    static constexpr auto accurate_cast_name = "accurateCast";
-    static constexpr auto accurate_cast_or_null_name = "accurateCastOrNull";
-    static constexpr auto cast_name = "CAST";
-
     static constexpr auto name = cast_type == CastType::accurate
-        ? accurate_cast_name
-        : (cast_type == CastType::accurateOrNull ? accurate_cast_or_null_name : cast_name);
-
-    static FunctionOverloadResolverPtr create(ContextPtr context)
-    {
-        return createImpl(context->getSettingsRef().cast_keep_nullable);
-    }
-
-    static FunctionOverloadResolverPtr createImpl(bool keep_nullable, std::optional<Diagnostic> diagnostic = {})
-    {
-        return std::make_unique<CastOverloadResolver>(keep_nullable, std::move(diagnostic));
-    }
-
-
-    explicit CastOverloadResolver(bool keep_nullable_, std::optional<Diagnostic> diagnostic_ = {})
-        : keep_nullable(keep_nullable_), diagnostic(std::move(diagnostic_))
-    {}
+        ? Name::accurate_cast_name
+        : (cast_type == CastType::accurateOrNull ? Name::accurate_cast_or_null_name : Name::cast_name);
 
     String getName() const override { return name; }
 
     size_t getNumberOfArguments() const override { return 2; }
 
     ColumnNumbers getArgumentsThatAreAlwaysConstant() const override { return {1}; }
+
+    explicit CastOverloadResolverImpl(std::optional<Diagnostic> diagnostic_, bool keep_nullable_)
+        : diagnostic(std::move(diagnostic_)), keep_nullable(keep_nullable_)
+    {
+    }
+
+    static FunctionOverloadResolverPtr create(ContextPtr context)
+    {
+        return createImpl({}, internal ? false : context->getSettingsRef().cast_keep_nullable);
+    }
+
+    static FunctionOverloadResolverPtr createImpl(std::optional<Diagnostic> diagnostic = {}, bool keep_nullable = false)
+    {
+        assert(!internal || !keep_nullable);
+        return std::make_unique<CastOverloadResolverImpl>(std::move(diagnostic), keep_nullable);
+    }
 
 protected:
 
@@ -3448,23 +3453,41 @@ protected:
         DataTypePtr type = DataTypeFactory::instance().get(type_col->getValue<String>());
 
         if constexpr (cast_type == CastType::accurateOrNull)
-        {
             return makeNullable(type);
-        }
-        else
-        {
-            if (keep_nullable && arguments.front().type->isNullable())
-                return makeNullable(type);
+
+        if constexpr (internal)
             return type;
-        }
+
+        if (keep_nullable && arguments.front().type->isNullable())
+            return makeNullable(type);
+
+        return type;
     }
 
     bool useDefaultImplementationForNulls() const override { return false; }
     bool useDefaultImplementationForLowCardinalityColumns() const override { return false; }
 
 private:
-    bool keep_nullable;
     std::optional<Diagnostic> diagnostic;
+    bool keep_nullable;
 };
+
+
+struct CastName
+{
+    static constexpr auto cast_name = "Cast";
+    static constexpr auto accurate_cast_name = "CastAccurate";
+    static constexpr auto accurate_cast_or_null_name = "CastAccurateOrNull";
+};
+
+struct CastInternalName
+{
+    static constexpr auto cast_name = "CastInternal";
+    static constexpr auto accurate_cast_name = "CastInternalAccurate";
+    static constexpr auto accurate_cast_or_null_name = "CastInternalAccurateOrNull";
+};
+
+template<CastType cast_type> using CastOverloadResolver = CastOverloadResolverImpl<cast_type, false, CastName>;
+template<CastType cast_type> using CastInternalOverloadResolver = CastOverloadResolverImpl<cast_type, true, CastInternalName>;
 
 }
