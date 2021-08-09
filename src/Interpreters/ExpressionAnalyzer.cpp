@@ -238,13 +238,37 @@ void ExpressionAnalyzer::analyzeAggregation()
             {
                 NameSet unique_keys;
                 ASTs & group_asts = select_query->groupBy()->children;
+                const auto & columns = syntax->source_columns;
+
                 for (ssize_t i = 0; i < ssize_t(group_asts.size()); ++i)
                 {
                     ssize_t size = group_asts.size();
                     getRootActionsNoMakeSet(group_asts[i], true, temp_actions, false);
 
+                    if (getContext()->getSettingsRef().allow_group_by_column_number)
+                    {
+                        /// Case when GROUP BY element is position.
+                        /// Do not consider case when GROUP BY element is expression, even if all values are contants.
+                        /// (because does it worth it to first check that exactly all elements in expression are positions
+                        /// and then traverse once again to make replacement?)
+                        if (const auto * ast_literal = typeid_cast<const ASTLiteral *>(group_asts[i].get()))
+                        {
+                            auto which = ast_literal->value.getType();
+                            if (which == Field::Types::UInt64)
+                            {
+                                auto pos = ast_literal->value.get<UInt64>();
+                                if ((0 < pos) && (pos <= columns.size()))
+                                {
+                                    const auto & column_name = std::next(columns.begin(), pos - 1)->name;
+                                    group_asts[i] = std::make_shared<ASTIdentifier>(column_name);
+                                }
+                            }
+                        }
+                    }
+
                     const auto & column_name = group_asts[i]->getColumnName(getContext()->getSettingsRef());
                     const auto * node = temp_actions->tryFindInIndex(column_name);
+
                     if (!node)
                         throw Exception("Unknown identifier (in GROUP BY): " + column_name, ErrorCodes::UNKNOWN_IDENTIFIER);
 
