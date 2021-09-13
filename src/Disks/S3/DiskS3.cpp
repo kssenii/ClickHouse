@@ -133,7 +133,7 @@ public:
     ReadIndirectBufferFromS3(
         std::shared_ptr<Aws::S3::S3Client> client_ptr_,
         const String & bucket_,
-        DiskS3::Metadata metadata_,
+        MetadataPtr metadata_,
         size_t max_single_read_retries_,
         size_t buf_size_)
         : ReadIndirectBufferFromRemoteFS<ReadBufferFromS3>(metadata_)
@@ -141,12 +141,13 @@ public:
         , bucket(bucket_)
         , max_single_read_retries(max_single_read_retries_)
         , buf_size(buf_size_)
+        , remote_fs_root_path(metadata_->remote_fs_root_path)
     {
     }
 
     std::unique_ptr<ReadBufferFromS3> createReadBuffer(const String & path) override
     {
-        return std::make_unique<ReadBufferFromS3>(client_ptr, bucket, fs::path(metadata.remote_fs_root_path) / path, max_single_read_retries, buf_size);
+        return std::make_unique<ReadBufferFromS3>(client_ptr, bucket, fs::path(remote_fs_root_path) / path, max_single_read_retries, buf_size);
     }
 
 private:
@@ -154,6 +155,7 @@ private:
     const String & bucket;
     UInt64 max_single_read_retries;
     size_t buf_size;
+    String remote_fs_root_path;
 };
 
 DiskS3::DiskS3(
@@ -163,7 +165,7 @@ DiskS3::DiskS3(
     String metadata_path_,
     SettingsPtr settings_,
     GetDiskSettings settings_getter_)
-    : IDiskRemote(name_, s3_root_path_, metadata_path_, "DiskS3", settings_->thread_pool_size)
+    : IDiskRemote<LocalMetadata>(name_, s3_root_path_, metadata_path_, "DiskS3", settings_->thread_pool_size)
     , bucket(std::move(bucket_))
     , current_settings(std::move(settings_))
     , settings_getter(settings_getter_)
@@ -174,6 +176,12 @@ RemoteFSPathKeeperPtr DiskS3::createFSPathKeeper() const
 {
     auto settings = current_settings.get();
     return std::make_shared<S3PathKeeper>(settings->objects_chunk_size_to_delete);
+}
+
+MetadataPtr DiskS3::getRemoteMetadata(const String & path) const
+{
+    auto settings = current_settings.get();
+    return std::make_unique<S3Metadata>(remote_fs_root_path, path, settings->client, bucket, settings->s3_min_upload_part_size, settings->s3_max_single_part_upload_size);
 }
 
 void DiskS3::removeFromRemoteFS(RemoteFSPathKeeperPtr fs_paths_keeper)
@@ -227,7 +235,7 @@ std::unique_ptr<ReadBufferFromFileBase> DiskS3::readFile(const String & path, co
     auto metadata = readMeta(path);
 
     LOG_TRACE(log, "Read from file by path: {}. Existing S3 objects: {}",
-        backQuote(metadata_path + path), metadata.remote_fs_objects.size());
+        backQuote((fs::path(metadata_path) / path).string()), metadata->remote_fs_objects.size());
 
     auto reader = std::make_unique<ReadIndirectBufferFromS3>(
         settings->client, bucket, metadata, settings->s3_max_single_read_retries, read_settings.remote_fs_buffer_size);
@@ -252,19 +260,21 @@ std::unique_ptr<WriteBufferFromFileBase> DiskS3::writeFile(const String & path, 
         s3_path = "r" + revisionToString(revision) + "-file-" + s3_path;
     }
 
-    LOG_TRACE(log, "{} to file by path: {}. S3 path: {}",
-              mode == WriteMode::Rewrite ? "Write" : "Append", backQuote(metadata_path + path), remote_fs_root_path + s3_path);
+    LOG_TRACE(log,
+              "{} to file by path: {}. S3 path: {}",
+              mode == WriteMode::Rewrite ? "Write" : "Append",
+              backQuote((fs::path(metadata_path) / path).string()), (fs::path(remote_fs_root_path) / s3_path).string());
 
     auto s3_buffer = std::make_unique<WriteBufferFromS3>(
         settings->client,
         bucket,
-        metadata.remote_fs_root_path + s3_path,
+        fs::path(metadata->remote_fs_root_path) / s3_path,
         settings->s3_min_upload_part_size,
         settings->s3_max_single_part_upload_size,
         std::move(object_metadata),
         buf_size);
 
-    return std::make_unique<WriteIndirectBufferFromRemoteFS<WriteBufferFromS3>>(std::move(s3_buffer), std::move(metadata), s3_path);
+    return std::make_unique<WriteIndirectBufferFromRemoteFS<WriteBufferFromS3, LocalMetadata>>(std::move(s3_buffer), std::move(metadata), s3_path);
 }
 
 void DiskS3::createHardLink(const String & src_path, const String & dst_path)
@@ -288,11 +298,11 @@ void DiskS3::createHardLink(const String & src_path, const String & dst_path, bo
 
     /// Increment number of references.
     auto src = readMeta(src_path);
-    ++src.ref_count;
-    src.save();
+    ++src->ref_count;
+    src->save();
 
     /// Create FS hardlink to metadata file.
-    DB::createHardLink(metadata_path + src_path, metadata_path + dst_path);
+    DB::createHardLink(fs::path(metadata_path) / src_path, fs::path(metadata_path) / dst_path);
 }
 
 void DiskS3::shutdown()
@@ -368,7 +378,7 @@ void DiskS3::findLastRevision()
 int DiskS3::readSchemaVersion(const String & source_bucket, const String & source_path)
 {
     int version = 0;
-    if (!checkObjectExists(source_bucket, source_path + SCHEMA_VERSION_OBJECT))
+    if (!checkObjectExists(source_bucket, fs::path(source_path) / SCHEMA_VERSION_OBJECT))
         return version;
 
     auto settings = current_settings.get();
@@ -391,7 +401,7 @@ void DiskS3::saveSchemaVersion(const int & version)
     WriteBufferFromS3 buffer(
         settings->client,
         bucket,
-        remote_fs_root_path + SCHEMA_VERSION_OBJECT,
+        fs::path(remote_fs_root_path) / SCHEMA_VERSION_OBJECT,
         settings->s3_min_upload_part_size,
         settings->s3_max_single_part_upload_size);
 
@@ -410,12 +420,12 @@ void DiskS3::migrateFileToRestorableSchema(const String & path)
 
     auto meta = readMeta(path);
 
-    for (const auto & [key, _] : meta.remote_fs_objects)
+    for (const auto & [key, _] : meta->remote_fs_objects)
     {
         ObjectMetadata metadata {
             {"path", path}
         };
-        updateObjectMetadata(remote_fs_root_path + key, metadata);
+        updateObjectMetadata(fs::path(remote_fs_root_path) / key, metadata);
     }
 }
 
@@ -869,8 +879,8 @@ void DiskS3::processRestoreFiles(const String & source_bucket, const String & so
         if (bucket != source_bucket || remote_fs_root_path != source_path)
             copyObject(source_bucket, key, bucket, remote_fs_root_path + relative_key, head_result);
 
-        metadata.addObject(relative_key, head_result.GetContentLength());
-        metadata.save();
+        metadata->addObject(relative_key, head_result.GetContentLength());
+        metadata->save();
 
         LOG_TRACE(log, "Restored file {}", path);
     }

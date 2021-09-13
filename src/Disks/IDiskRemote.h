@@ -6,11 +6,14 @@
 
 #include <atomic>
 #include "Disks/DiskFactory.h"
-#include "Disks/Executor.h"
+#include <Disks/Executor.h>
+#include <Disks/RemoteFSMetadata.h>
 #include <utility>
 #include <Common/MultiVersion.h>
 #include <Common/ThreadPool.h>
+#include <Disks/RemoteFSMetadata.h>
 #include <filesystem>
+
 
 namespace fs = std::filesystem;
 
@@ -22,7 +25,7 @@ namespace DB
 class RemoteFSPathKeeper
 {
 public:
-    RemoteFSPathKeeper(size_t chunk_limit_) : chunk_limit(chunk_limit_) {}
+    explicit RemoteFSPathKeeper(size_t chunk_limit_) : chunk_limit(chunk_limit_) {}
 
     virtual ~RemoteFSPathKeeper() = default;
 
@@ -34,8 +37,15 @@ protected:
 
 using RemoteFSPathKeeperPtr = std::shared_ptr<RemoteFSPathKeeper>;
 
+struct ReservationData
+{
+    UInt64 reserved_bytes = 0;
+    UInt64 reservation_count = 0;
+    std::mutex reservation_mutex;
+};
 
 /// Base Disk class for remote FS's, which are not posix-compatible (DiskS3 and DiskHDFS)
+template <typename Metadata>
 class IDiskRemote : public IDisk
 {
 
@@ -49,17 +59,17 @@ public:
         const String & log_name_,
         size_t thread_pool_size);
 
-    struct Metadata;
-
     const String & getName() const final override { return name; }
 
     const String & getPath() const final override { return metadata_path; }
 
-    Metadata readMeta(const String & path) const;
+    MetadataPtr readMeta(const String & path) const;
 
-    Metadata createMeta(const String & path) const;
+    MetadataPtr createMeta(const String & path) const;
 
-    Metadata readOrCreateMetaForWriting(const String & path, WriteMode mode);
+    MetadataPtr readOrCreateMetaForWriting(const String & path, WriteMode mode);
+
+    virtual MetadataPtr getRemoteMetadata(const String & path) const = 0;
 
     UInt64 getTotalSpace() const override { return std::numeric_limits<UInt64>::max(); }
 
@@ -141,73 +151,15 @@ private:
 
     bool tryReserve(UInt64 bytes);
 
-    UInt64 reserved_bytes = 0;
-    UInt64 reservation_count = 0;
-    std::mutex reservation_mutex;
+    ReservationData reservation_data;
 };
 
-using RemoteDiskPtr = std::shared_ptr<IDiskRemote>;
-
-
-/// Minimum info, required to be passed to ReadIndirectBufferFromRemoteFS<T>
-struct RemoteMetadata
-{
-    using PathAndSize = std::pair<String, size_t>;
-
-    /// Remote FS objects paths and their sizes.
-    std::vector<PathAndSize> remote_fs_objects;
-
-    /// URI
-    const String & remote_fs_root_path;
-
-    /// Relative path to metadata file on local FS.
-    const String metadata_file_path;
-
-    RemoteMetadata(const String & remote_fs_root_path_, const String & metadata_file_path_)
-        : remote_fs_root_path(remote_fs_root_path_), metadata_file_path(metadata_file_path_) {}
-};
-
-/// Remote FS (S3, HDFS) metadata file layout:
-/// FS objects, their number and total size of all FS objects.
-/// Each FS object represents a file path in remote FS and its size.
-
-struct IDiskRemote::Metadata : RemoteMetadata
-{
-    /// Metadata file version.
-    static constexpr UInt32 VERSION_ABSOLUTE_PATHS = 1;
-    static constexpr UInt32 VERSION_RELATIVE_PATHS = 2;
-    static constexpr UInt32 VERSION_READ_ONLY_FLAG = 3;
-
-    /// Disk path.
-    const String & disk_path;
-
-    /// Total size of all remote FS (S3, HDFS) objects.
-    size_t total_size = 0;
-
-    /// Number of references (hardlinks) to this metadata file.
-    UInt32 ref_count = 0;
-
-    /// Flag indicates that file is read only.
-    bool read_only = false;
-
-    /// Load metadata by path or create empty if `create` flag is set.
-    Metadata(const String & remote_fs_root_path_,
-            const String & disk_path_,
-            const String & metadata_file_path_,
-            bool create = false);
-
-    void addObject(const String & path, size_t size);
-
-    /// Fsync metadata file if 'sync' flag is set.
-    void save(bool sync = false);
-
-};
-
+template <typename Metadata> using RemoteDiskPtr = std::shared_ptr<IDiskRemote<Metadata>>;
 
 class RemoteDiskDirectoryIterator final : public IDiskDirectoryIterator
 {
 public:
-    RemoteDiskDirectoryIterator() {}
+    RemoteDiskDirectoryIterator() = default;
     RemoteDiskDirectoryIterator(const String & full_path, const String & folder_path_) : iter(full_path), folder_path(folder_path_) {}
 
     void next() override { ++iter; }
@@ -233,8 +185,12 @@ private:
 class DiskRemoteReservation final : public IReservation
 {
 public:
-    DiskRemoteReservation(const RemoteDiskPtr & disk_, UInt64 size_)
-        : disk(disk_), size(size_), metric_increment(CurrentMetrics::DiskSpaceReservedForMerge, size_)
+    DiskRemoteReservation(const DiskPtr & disk_, UInt64 size_, ReservationData & data_, Poco::Logger * log_)
+        : disk(disk_)
+        , size(size_)
+        , metric_increment(CurrentMetrics::DiskSpaceReservedForMerge, size_)
+        , data(data_)
+        , log(log_)
     {
     }
 
@@ -249,9 +205,11 @@ public:
     ~DiskRemoteReservation() override;
 
 private:
-    RemoteDiskPtr disk;
+    DiskPtr disk;
     UInt64 size;
     CurrentMetrics::Increment metric_increment;
+    ReservationData & data;
+    Poco::Logger * log;
 };
 
 

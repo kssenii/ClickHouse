@@ -55,7 +55,7 @@ struct DiskS3Settings
  * Files are represented by file in local filesystem (clickhouse_root/disks/disk_name/path/to/file)
  * that contains S3 object key with actual data.
  */
-class DiskS3 final : public IDiskRemote
+class DiskS3 final : public IDiskRemote<LocalMetadata>
 {
 public:
     using ObjectMetadata = std::map<std::string, std::string>;
@@ -112,6 +112,8 @@ public:
     void onFreeze(const String & path) override;
 
     void applyNewSettings(const Poco::Util::AbstractConfiguration & config, ContextPtr context, const String &, const DisksMap &) override;
+
+    MetadataPtr getRemoteMetadata(const String & path) const override;
 
 private:
     void createFileOperationObject(const String & operation_name, UInt64 revision, const ObjectMetadata & metadata);

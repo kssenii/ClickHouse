@@ -2,26 +2,25 @@
 
 #include <IO/WriteBufferFromS3.h>
 #include <Storages/HDFS/WriteBufferFromHDFS.h>
-#include <IO/WriteBufferFromHTTP.h>
 
 
 namespace DB
 {
 
-template <typename T>
-WriteIndirectBufferFromRemoteFS<T>::WriteIndirectBufferFromRemoteFS(
+template <typename T, typename Metadata>
+WriteIndirectBufferFromRemoteFS<T, Metadata>::WriteIndirectBufferFromRemoteFS(
     std::unique_ptr<T> impl_,
-    IDiskRemote::Metadata metadata_,
+    MetadataPtr metadata_,
     const String & remote_fs_path_)
     : WriteBufferFromFileDecorator(std::move(impl_))
-    , metadata(std::move(metadata_))
+    , metadata(metadata_)
     , remote_fs_path(remote_fs_path_)
 {
 }
 
 
-template <typename T>
-WriteIndirectBufferFromRemoteFS<T>::~WriteIndirectBufferFromRemoteFS()
+template <typename T, typename Metadata>
+WriteIndirectBufferFromRemoteFS<T, Metadata>::~WriteIndirectBufferFromRemoteFS()
 {
     try
     {
@@ -34,38 +33,35 @@ WriteIndirectBufferFromRemoteFS<T>::~WriteIndirectBufferFromRemoteFS()
 }
 
 
-template <typename T>
-void WriteIndirectBufferFromRemoteFS<T>::finalize()
+template <typename T, typename Metadata>
+void WriteIndirectBufferFromRemoteFS<T, Metadata>::finalize()
 {
     if (finalized)
         return;
 
     WriteBufferFromFileDecorator::finalize();
 
-    metadata.addObject(remote_fs_path, count());
-    metadata.save();
+    metadata->addObject(remote_fs_path, count());
+    metadata->save();
 }
 
 
-template <typename T>
-void WriteIndirectBufferFromRemoteFS<T>::sync()
+template <typename T, typename Metadata>
+void WriteIndirectBufferFromRemoteFS<T, Metadata>::sync()
 {
     if (finalized)
-        metadata.save(true);
+        metadata->save(true);
 }
 
 
 #if USE_AWS_S3
 template
-class WriteIndirectBufferFromRemoteFS<WriteBufferFromS3>;
+class WriteIndirectBufferFromRemoteFS<WriteBufferFromS3, LocalMetadata>;
 #endif
 
 #if USE_HDFS
 template
-class WriteIndirectBufferFromRemoteFS<WriteBufferFromHDFS>;
+class WriteIndirectBufferFromRemoteFS<WriteBufferFromHDFS, LocalMetadata>;
 #endif
-
-template
-class WriteIndirectBufferFromRemoteFS<WriteBufferFromHTTP>;
 
 }

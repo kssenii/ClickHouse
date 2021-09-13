@@ -54,7 +54,7 @@ public:
     ReadIndirectBufferFromHDFS(
             const Poco::Util::AbstractConfiguration & config_,
             const String & hdfs_uri_,
-            DiskHDFS::Metadata metadata_,
+            MetadataPtr metadata_,
             size_t buf_size_)
         : ReadIndirectBufferFromRemoteFS<ReadBufferFromHDFS>(metadata_)
         , config(config_)
@@ -67,7 +67,7 @@ public:
 
     std::unique_ptr<ReadBufferFromHDFS> createReadBuffer(const String & path) override
     {
-        return std::make_unique<ReadBufferFromHDFS>(hdfs_uri, hdfs_directory + path, config, buf_size);
+        return std::make_unique<ReadBufferFromHDFS>(hdfs_uri, fs::path(hdfs_directory) / path, config, buf_size);
     }
 
 private:
@@ -84,7 +84,7 @@ DiskHDFS::DiskHDFS(
     SettingsPtr settings_,
     const String & metadata_path_,
     const Poco::Util::AbstractConfiguration & config_)
-    : IDiskRemote(disk_name_, hdfs_root_path_, metadata_path_, "DiskHDFS", settings_->thread_pool_size)
+    : IDiskRemote<LocalMetadata>(disk_name_, hdfs_root_path_, metadata_path_, "DiskHDFS", settings_->thread_pool_size)
     , config(config_)
     , hdfs_builder(createHDFSBuilder(hdfs_root_path_, config))
     , hdfs_fs(createHDFSFS(hdfs_builder.get()))
@@ -99,7 +99,7 @@ std::unique_ptr<ReadBufferFromFileBase> DiskHDFS::readFile(const String & path, 
 
     LOG_TRACE(log,
         "Read from file by path: {}. Existing HDFS objects: {}",
-        backQuote(metadata_path + path), metadata.remote_fs_objects.size());
+        backQuote((fs::path(metadata_path) / path).string()), metadata->remote_fs_objects.size());
 
     auto reader = std::make_unique<ReadIndirectBufferFromHDFS>(config, remote_fs_root_path, metadata, read_settings.remote_fs_buffer_size);
     return std::make_unique<SeekAvoidingReadBuffer>(std::move(reader), settings->min_bytes_for_seek);
@@ -112,19 +112,18 @@ std::unique_ptr<WriteBufferFromFileBase> DiskHDFS::writeFile(const String & path
 
     /// Path to store new HDFS object.
     auto file_name = getRandomName();
-    auto hdfs_path = remote_fs_root_path + file_name;
+    String hdfs_path = fs::path(remote_fs_root_path) / file_name;
 
     LOG_TRACE(log, "{} to file by path: {}. HDFS path: {}", mode == WriteMode::Rewrite ? "Write" : "Append",
-              backQuote(metadata_path + path), hdfs_path);
+              backQuote((fs::path(metadata_path) / path).string()), hdfs_path);
 
     /// Single O_WRONLY in libhdfs adds O_TRUNC
     auto hdfs_buffer = std::make_unique<WriteBufferFromHDFS>(hdfs_path,
                                                              config, buf_size,
                                                              mode == WriteMode::Rewrite ? O_WRONLY :  O_WRONLY | O_APPEND);
 
-    return std::make_unique<WriteIndirectBufferFromRemoteFS<WriteBufferFromHDFS>>(std::move(hdfs_buffer),
-                                                                                std::move(metadata),
-                                                                                file_name);
+    return std::make_unique<WriteIndirectBufferFromRemoteFS<WriteBufferFromHDFS, LocalMetadata>>(std::move(hdfs_buffer),
+                                                                                                 std::move(metadata), file_name);
 }
 
 

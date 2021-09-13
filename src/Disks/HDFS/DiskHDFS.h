@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Disks/IDiskRemote.h>
+#include <Disks/RemoteFSMetadata.h>
 #include <Storages/HDFS/HDFSCommon.h>
 #include <Core/UUID.h>
 #include <memory>
@@ -8,6 +9,11 @@
 
 namespace DB
 {
+
+namespace ErrorCodes
+{
+    extern const int NOT_IMPLEMENTED;
+}
 
 struct DiskHDFSSettings
 {
@@ -24,13 +30,12 @@ struct DiskHDFSSettings
         , objects_chunk_size_to_delete(objects_chunk_size_to_delete_) {}
 };
 
-
 /**
  * Storage for persisting data in HDFS and metadata on the local disk.
  * Files are represented by file in local filesystem (clickhouse_root/disks/disk_name/path/to/file)
  * that contains HDFS object key with actual data.
  */
-class DiskHDFS final : public IDiskRemote
+class DiskHDFS final : public IDiskRemote<LocalMetadata>
 {
 public:
     using SettingsPtr = std::unique_ptr<DiskHDFSSettings>;
@@ -43,6 +48,7 @@ public:
         const Poco::Util::AbstractConfiguration & config_);
 
     DiskType getType() const override { return DiskType::HDFS; }
+
     bool isRemote() const override { return true; }
 
     bool supportZeroCopyReplication() const override { return true; }
@@ -62,6 +68,11 @@ public:
     /// Overrode in remote disk
     /// Required for remote disk to ensure that replica has access to data written by other node
     bool checkUniqueId(const String & hdfs_uri) const override;
+
+    MetadataPtr getRemoteMetadata(const String &) const override
+    {
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Remote metadata is not supported for DiskHDFS");
+    }
 
 private:
     String getRandomName() { return toString(UUIDHelpers::generateV4()); }

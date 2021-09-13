@@ -110,7 +110,7 @@ class ReadBufferFromWebServer final : public ReadIndirectBufferFromRemoteFS<Read
 public:
     ReadBufferFromWebServer(
             const String & uri_,
-            RemoteMetadata metadata_,
+            IMetadataPtr metadata_,
             ContextPtr context_,
             size_t buf_size_)
         : ReadIndirectBufferFromRemoteFS<ReadIndirectBufferFromWebServer>(metadata_)
@@ -187,10 +187,10 @@ std::unique_ptr<ReadBufferFromFileBase> DiskWebServer::readFile(const String & p
     auto remote_path = fs_path.parent_path() / (escapeForFileName(fs_path.stem()) + fs_path.extension().string());
     remote_path = remote_path.string().substr(url.size());
 
-    RemoteMetadata meta(path, remote_path);
-    meta.remote_fs_objects.emplace_back(std::make_pair(remote_path, iter->second.size));
+    auto metadata = std::make_shared<IRemoteFSMetadata>(path, remote_path, fs::path(url) / "store");
+    metadata->remote_fs_objects.emplace_back(std::make_pair(remote_path, iter->second.size));
 
-    auto reader = std::make_unique<ReadBufferFromWebServer>(url, meta, getContext(), read_settings.remote_fs_buffer_size);
+    auto reader = std::make_unique<ReadBufferFromWebServer>(url, metadata, getContext(), read_settings.remote_fs_buffer_size);
     return std::make_unique<SeekAvoidingReadBuffer>(std::move(reader), min_bytes_for_seek);
 }
 

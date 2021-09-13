@@ -5,6 +5,7 @@
 #endif
 
 #include <Disks/IDiskRemote.h>
+#include <Disks/RemoteFSMetadata.h>
 #include <IO/WriteBufferFromFile.h>
 #include <IO/WriteBufferFromFileDecorator.h>
 
@@ -12,13 +13,13 @@ namespace DB
 {
 
 /// Stores data in S3/HDFS and adds the object path and object size to metadata file on local FS.
-template <typename T>
+template <typename T, typename Metadata>
 class WriteIndirectBufferFromRemoteFS final : public WriteBufferFromFileDecorator
 {
 public:
     WriteIndirectBufferFromRemoteFS(
         std::unique_ptr<T> impl_,
-        IDiskRemote::Metadata metadata_,
+        MetadataPtr metadata_,
         const String & remote_fs_path_);
 
     virtual ~WriteIndirectBufferFromRemoteFS() override;
@@ -27,10 +28,10 @@ public:
 
     void sync() override;
 
-    String getFileName() const override { return metadata.metadata_file_path; }
+    String getFileName() const override { return metadata->metadata_file_path; }
 
 private:
-    IDiskRemote::Metadata metadata;
+    MetadataPtr metadata;
 
     String remote_fs_path;
 };

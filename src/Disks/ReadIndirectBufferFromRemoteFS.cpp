@@ -15,9 +15,8 @@ namespace ErrorCodes
 
 
 template<typename T>
-ReadIndirectBufferFromRemoteFS<T>::ReadIndirectBufferFromRemoteFS(
-    RemoteMetadata metadata_)
-    : metadata(std::move(metadata_))
+ReadIndirectBufferFromRemoteFS<T>::ReadIndirectBufferFromRemoteFS(IMetadataPtr metadata_)
+    : metadata(metadata_)
 {
 }
 
@@ -66,10 +65,10 @@ template<typename T>
 std::unique_ptr<T> ReadIndirectBufferFromRemoteFS<T>::initialize()
 {
     size_t offset = absolute_position;
-    for (size_t i = 0; i < metadata.remote_fs_objects.size(); ++i)
+    for (size_t i = 0; i < metadata->remote_fs_objects.size(); ++i)
     {
         current_buf_idx = i;
-        const auto & [file_path, size] = metadata.remote_fs_objects[i];
+        const auto & [file_path, size] = metadata->remote_fs_objects[i];
         if (size > offset)
         {
             auto buf = createReadBuffer(file_path);
@@ -98,11 +97,11 @@ bool ReadIndirectBufferFromRemoteFS<T>::nextImpl()
     }
 
     /// If there is no available buffers - nothing to read.
-    if (current_buf_idx + 1 >= metadata.remote_fs_objects.size())
+    if (current_buf_idx + 1 >= metadata->remote_fs_objects.size())
         return false;
 
     ++current_buf_idx;
-    const auto & path = metadata.remote_fs_objects[current_buf_idx].first;
+    const auto & path = metadata->remote_fs_objects[current_buf_idx].first;
 
     current_buf = createReadBuffer(path);
 
