@@ -18,6 +18,8 @@
 
 #include <Disks/ReadIndirectBufferFromRemoteFS.h>
 #include <Disks/WriteIndirectBufferFromRemoteFS.h>
+#include <Disks/RemoteMetadata/LocalMetadata.h>
+#include <Disks/RemoteMetadata/S3Metadata.h>
 
 #include <Interpreters/Context.h>
 
@@ -133,7 +135,7 @@ public:
     ReadIndirectBufferFromS3(
         std::shared_ptr<Aws::S3::S3Client> client_ptr_,
         const String & bucket_,
-        MetadataPtr metadata_,
+        VFSMetadataOnDiskPtr metadata_,
         size_t max_single_read_retries_,
         size_t buf_size_)
         : ReadIndirectBufferFromRemoteFS<ReadBufferFromS3>(metadata_)
@@ -174,18 +176,16 @@ DiskS3<Metadata>::DiskS3(
 }
 
 template <typename Metadata>
+VFSMetadataOnDiskPtr DiskS3<Metadata>::createMeta(const String & path) const
+{
+    return std::make_unique<Metadata>(std::static_pointer_cast<const DiskS3>(this->shared_from_this()), this->remote_fs_root_path, path, this->metadata_path);
+}
+
+template <typename Metadata>
 RemoteFSPathKeeperPtr DiskS3<Metadata>::createFSPathKeeper() const
 {
     auto settings = current_settings.get();
     return std::make_shared<S3PathKeeper>(settings->objects_chunk_size_to_delete);
-}
-
-template <typename Metadata>
-MetadataPtr DiskS3<Metadata>::getRemoteMetadata(const String & path) const
-{
-    auto settings = current_settings.get();
-    return std::make_unique<S3Metadata>(this->remote_fs_root_path, path,
-            settings->client, bucket, settings->s3_min_upload_part_size, settings->s3_max_single_part_upload_size);
 }
 
 template <typename Metadata>

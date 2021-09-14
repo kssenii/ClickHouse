@@ -4,9 +4,9 @@
 #include <Common/config.h>
 #endif
 
-#include <IO/ReadBufferFromFile.h>
 #include <Disks/IDiskRemote.h>
-#include <Disks/RemoteFSMetadata.h>
+#include <Disks/RemoteMetadata/RemoteFSMetadata.h>
+#include <IO/ReadBufferFromFile.h>
 #include <utility>
 
 
@@ -18,18 +18,18 @@ template <typename T>
 class ReadIndirectBufferFromRemoteFS : public ReadBufferFromFileBase
 {
 public:
-    explicit ReadIndirectBufferFromRemoteFS(IMetadataPtr metadata_);
+    explicit ReadIndirectBufferFromRemoteFS(VFSMetadataPtr metadata_);
 
     off_t seek(off_t offset_, int whence) override;
 
     off_t getPosition() override { return absolute_position - available(); }
 
-    String getFileName() const override { return metadata->metadata_file_path; }
+    String getFileName() const override { return metadata->file_path; }
 
     virtual std::unique_ptr<T> createReadBuffer(const String & path) = 0;
 
 protected:
-    IMetadataPtr metadata;
+    VFSMetadataPtr metadata;
 
 private:
     std::unique_ptr<T> initialize();

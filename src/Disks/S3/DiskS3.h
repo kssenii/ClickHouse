@@ -9,8 +9,8 @@
 #include <atomic>
 #include <optional>
 #include <common/logger_useful.h>
-#include "Disks/DiskFactory.h"
-#include "Disks/Executor.h"
+#include <Disks/DiskFactory.h>
+#include <Disks/Executor.h>
 
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/HeadObjectResult.h>
@@ -58,6 +58,8 @@ struct DiskS3Settings
 template <typename Metadata>
 class DiskS3 final : public IDiskRemote<Metadata>
 {
+friend struct S3Metadata;
+
 public:
     using ObjectMetadata = std::map<std::string, std::string>;
     using Futures = std::vector<std::future<void>>;
@@ -114,7 +116,7 @@ public:
 
     void applyNewSettings(const Poco::Util::AbstractConfiguration & config, ContextPtr context, const String &, const DisksMap &) override;
 
-    MetadataPtr getRemoteMetadata(const String & path) const override;
+    VFSMetadataOnDiskPtr createMeta(const String & path) const override;
 
 private:
     void createFileOperationObject(const String & operation_name, UInt64 revision, const ObjectMetadata & metadata);

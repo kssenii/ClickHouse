@@ -10,15 +10,20 @@
 
 #if USE_AWS_S3
 
-#include <aws/core/client/DefaultRetryStrategy.h> // Y_IGNORE
-#include <IO/S3Common.h>
 #include "DiskS3.h"
 #include "Disks/DiskCacheWrapper.h"
-#include "Storages/StorageS3Settings.h"
 #include "ProxyConfiguration.h"
 #include "ProxyListConfiguration.h"
 #include "ProxyResolverConfiguration.h"
 #include "Disks/DiskRestartProxy.h"
+
+#include <Disks/RemoteMetadata/LocalMetadata.h>
+#include <Disks/RemoteMetadata/S3Metadata.h>
+
+#include <IO/S3Common.h>
+#include "Storages/StorageS3Settings.h"
+
+#include <aws/core/client/DefaultRetryStrategy.h> // Y_IGNORE
 
 
 namespace DB
@@ -173,17 +178,18 @@ void registerDiskS3(DiskFactory & factory)
                       const Poco::Util::AbstractConfiguration & config,
                       const String & config_prefix,
                       ContextPtr context,
-                      const DisksMap & /*map*/) -> DiskPtr {
-        S3::URI uri(Poco::URI(config.getString(config_prefix + ".endpoint")));
+                      const DisksMap & /*map*/) -> DiskPtr
+    {
+        String config_uri = config.getString(config_prefix + ".endpoint");
+        auto poco_uri = Poco::URI(config_uri);
+        S3::URI uri(poco_uri);
+
         if (uri.key.back() != '/')
             throw Exception("S3 path must ends with '/', but '" + uri.key + "' doesn't.", ErrorCodes::BAD_ARGUMENTS);
 
-        String metadata_path = config.getString(config_prefix + ".metadata_path", fs::path(context->getPath()) / "disks" / name / "");
-        fs::create_directories(metadata_path);
-
-        bool remote_metadata = config.getBool(config_prefix + ".remote_metadata", false);
-
         DiskPtr s3disk;
+        auto metadata_path = config.getString(config_prefix + ".metadata_path", fs::path(context->getPath()) / "disks" / name / "");
+        bool remote_metadata = config.getBool(config_prefix + ".remote_metadata", false);
 
         if (remote_metadata)
         {
@@ -191,12 +197,14 @@ void registerDiskS3(DiskFactory & factory)
                 name,
                 uri.bucket,
                 uri.key,
-                metadata_path,
+                config_uri,
                 getSettings(config, config_prefix, context),
                 getSettings);
         }
         else
         {
+            fs::create_directories(metadata_path);
+
             s3disk = std::make_shared<DiskS3<LocalMetadata>>(
                 name,
                 uri.bucket,

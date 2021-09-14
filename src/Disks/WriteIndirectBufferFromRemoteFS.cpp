@@ -2,6 +2,8 @@
 
 #include <IO/WriteBufferFromS3.h>
 #include <Storages/HDFS/WriteBufferFromHDFS.h>
+#include <Disks/RemoteMetadata/LocalMetadata.h>
+#include <Disks/RemoteMetadata/S3Metadata.h>
 
 
 namespace DB
@@ -10,7 +12,7 @@ namespace DB
 template <typename T, typename Metadata>
 WriteIndirectBufferFromRemoteFS<T, Metadata>::WriteIndirectBufferFromRemoteFS(
     std::unique_ptr<T> impl_,
-    MetadataPtr metadata_,
+    VFSMetadataOnDiskPtr metadata_,
     const String & remote_fs_path_)
     : WriteBufferFromFileDecorator(std::move(impl_))
     , metadata(metadata_)
@@ -57,6 +59,8 @@ void WriteIndirectBufferFromRemoteFS<T, Metadata>::sync()
 #if USE_AWS_S3
 template
 class WriteIndirectBufferFromRemoteFS<WriteBufferFromS3, LocalMetadata>;
+template
+class WriteIndirectBufferFromRemoteFS<WriteBufferFromS3, S3Metadata>;
 #endif
 
 #if USE_HDFS

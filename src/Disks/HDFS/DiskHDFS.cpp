@@ -54,7 +54,7 @@ public:
     ReadIndirectBufferFromHDFS(
             const Poco::Util::AbstractConfiguration & config_,
             const String & hdfs_uri_,
-            MetadataPtr metadata_,
+            VFSMetadataOnDiskPtr metadata_,
             size_t buf_size_)
         : ReadIndirectBufferFromRemoteFS<ReadBufferFromHDFS>(metadata_)
         , config(config_)
@@ -90,6 +90,12 @@ DiskHDFS::DiskHDFS(
     , hdfs_fs(createHDFSFS(hdfs_builder.get()))
     , settings(std::move(settings_))
 {
+}
+
+
+VFSMetadataOnDiskPtr DiskHDFS::createMeta(const String & path) const
+{
+    return std::make_unique<LocalMetadata>(std::static_pointer_cast<const DiskHDFS>(shared_from_this()), remote_fs_root_path, path, metadata_path);
 }
 
 

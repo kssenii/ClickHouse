@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Disks/IDiskRemote.h>
-#include <Disks/RemoteFSMetadata.h>
+#include <Disks/RemoteMetadata/LocalMetadata.h>
 #include <Storages/HDFS/HDFSCommon.h>
 #include <Core/UUID.h>
 #include <memory>
@@ -69,10 +69,7 @@ public:
     /// Required for remote disk to ensure that replica has access to data written by other node
     bool checkUniqueId(const String & hdfs_uri) const override;
 
-    MetadataPtr getRemoteMetadata(const String &) const override
-    {
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Remote metadata is not supported for DiskHDFS");
-    }
+    VFSMetadataOnDiskPtr createMeta(const String & path) const override;
 
 private:
     String getRandomName() { return toString(UUIDHelpers::generateV4()); }

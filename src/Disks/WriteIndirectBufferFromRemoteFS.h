@@ -5,9 +5,10 @@
 #endif
 
 #include <Disks/IDiskRemote.h>
-#include <Disks/RemoteFSMetadata.h>
+#include <Disks/RemoteMetadata/RemoteFSMetadata.h>
 #include <IO/WriteBufferFromFile.h>
 #include <IO/WriteBufferFromFileDecorator.h>
+
 
 namespace DB
 {
@@ -19,7 +20,7 @@ class WriteIndirectBufferFromRemoteFS final : public WriteBufferFromFileDecorato
 public:
     WriteIndirectBufferFromRemoteFS(
         std::unique_ptr<T> impl_,
-        MetadataPtr metadata_,
+        VFSMetadataOnDiskPtr metadata_,
         const String & remote_fs_path_);
 
     virtual ~WriteIndirectBufferFromRemoteFS() override;
@@ -28,10 +29,10 @@ public:
 
     void sync() override;
 
-    String getFileName() const override { return metadata->metadata_file_path; }
+    String getFileName() const override { return metadata->file_path; }
 
 private:
-    MetadataPtr metadata;
+    VFSMetadataOnDiskPtr metadata;
 
     String remote_fs_path;
 };

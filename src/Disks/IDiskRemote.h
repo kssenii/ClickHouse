@@ -4,14 +4,14 @@
 #include <Common/config.h>
 #endif
 
-#include <atomic>
-#include "Disks/DiskFactory.h"
-#include <Disks/Executor.h>
-#include <Disks/RemoteFSMetadata.h>
-#include <utility>
 #include <Common/MultiVersion.h>
 #include <Common/ThreadPool.h>
-#include <Disks/RemoteFSMetadata.h>
+#include <Disks/DiskFactory.h>
+#include <Disks/Executor.h>
+#include <Disks/RemoteMetadata/RemoteFSMetadata.h>
+
+#include <atomic>
+#include <utility>
 #include <filesystem>
 
 
@@ -63,13 +63,11 @@ public:
 
     const String & getPath() const final override { return metadata_path; }
 
-    MetadataPtr readMeta(const String & path) const;
+    VFSMetadataOnDiskPtr readMeta(const String & path) const;
 
-    MetadataPtr createMeta(const String & path) const;
+    virtual VFSMetadataOnDiskPtr createMeta(const String & path) const = 0;
 
-    MetadataPtr readOrCreateMetaForWriting(const String & path, WriteMode mode);
-
-    virtual MetadataPtr getRemoteMetadata(const String & path) const = 0;
+    VFSMetadataOnDiskPtr readOrCreateMetaForWriting(const String & path, WriteMode mode);
 
     UInt64 getTotalSpace() const override { return std::numeric_limits<UInt64>::max(); }
 

@@ -1,17 +1,20 @@
 #include <Disks/IDiskRemote.h>
 
-#include "Disks/DiskFactory.h"
+#include <Common/quoteString.h>
+#include <common/logger_useful.h>
+#include <Common/checkStackSize.h>
+
+#include <Disks/DiskFactory.h>
+#include <Disks/RemoteMetadata/LocalMetadata.h>
+#include <Disks/RemoteMetadata/S3Metadata.h>
+
 #include <IO/ReadBufferFromFile.h>
 #include <IO/ReadHelpers.h>
 #include <IO/WriteBufferFromFile.h>
 #include <IO/WriteBufferFromS3.h>
 #include <IO/WriteHelpers.h>
-#include <Common/createHardLink.h>
-#include <Common/quoteString.h>
-#include <common/logger_useful.h>
-#include <Common/checkStackSize.h>
+
 #include <boost/algorithm/string.hpp>
-#include <Common/filesystemHelpers.h>
 
 
 namespace DB
@@ -22,13 +25,13 @@ namespace ErrorCodes
     extern const int INCORRECT_DISK_INDEX;
     extern const int UNKNOWN_FORMAT;
     extern const int FILE_ALREADY_EXISTS;
-    extern const int PATH_ACCESS_DENIED;;
     extern const int CANNOT_DELETE_DIRECTORY;
+    extern const int PATH_ACCESS_DENIED;;
 }
 
 
 template <typename Metadata>
-MetadataPtr IDiskRemote<Metadata>::readOrCreateMetaForWriting(const String & path, WriteMode mode)
+VFSMetadataOnDiskPtr IDiskRemote<Metadata>::readOrCreateMetaForWriting(const String & path, WriteMode mode)
 {
     bool exist = exists(path);
     if (exist)
@@ -52,33 +55,23 @@ MetadataPtr IDiskRemote<Metadata>::readOrCreateMetaForWriting(const String & pat
 
 
 template <typename Metadata>
-MetadataPtr IDiskRemote<Metadata>::readMeta(const String & path) const
+VFSMetadataOnDiskPtr IDiskRemote<Metadata>::readMeta(const String & path) const
 {
-    MetadataPtr metadata = createMeta(path);
+    VFSMetadataOnDiskPtr metadata = createMeta(path);
     metadata->read();
     return metadata;
 }
 
 
 template <typename Metadata>
-MetadataPtr IDiskRemote<Metadata>::createMeta(const String & path) const
-{
-    if (std::is_same_v<LocalMetadata, Metadata>)
-        return std::make_shared<LocalMetadata>(remote_fs_root_path, path, metadata_path);
-    else
-        return getRemoteMetadata(path);
-}
-
-
-template <typename Metadata>
 void IDiskRemote<Metadata>::removeMeta(const String & path, RemoteFSPathKeeperPtr fs_paths_keeper)
 {
-    LOG_DEBUG(log, "Remove file by path: {}", backQuote(metadata_path + path));
+    LOG_DEBUG(log, "Remove file by path: {}", backQuote((fs::path(metadata_path) / path).string()));
 
-    fs::path file(metadata_path + path);
-
-    if (!fs::is_regular_file(file))
+    if (!isFile(path))
         throw Exception(ErrorCodes::CANNOT_DELETE_DIRECTORY, "Path '{}' is a directory", path);
+
+    auto file = fs::path(metadata_path) / path;
 
     try
     {
@@ -119,8 +112,7 @@ void IDiskRemote<Metadata>::removeMetaRecursive(const String & path, RemoteFSPat
 {
     checkStackSize(); /// This is needed to prevent stack overflow in case of cyclic symlinks.
 
-    fs::path file = fs::path(metadata_path) / path;
-    if (fs::is_regular_file(file))
+    if (isFile(path))
     {
         removeMeta(path, fs_paths_keeper);
     }
@@ -128,6 +120,8 @@ void IDiskRemote<Metadata>::removeMetaRecursive(const String & path, RemoteFSPat
     {
         for (auto it{iterateDirectory(path)}; it->isValid(); it->next())
             removeMetaRecursive(it->path(), fs_paths_keeper);
+
+        fs::path file = fs::path(metadata_path) / path;
         fs::remove(file);
     }
 }
@@ -196,14 +190,14 @@ IDiskRemote<Metadata>::IDiskRemote(
 template <typename Metadata>
 bool IDiskRemote<Metadata>::exists(const String & path) const
 {
-    return fs::exists(fs::path(metadata_path) / path);
+    return createMeta(path)->exists();
 }
 
 
 template <typename Metadata>
 bool IDiskRemote<Metadata>::isFile(const String & path) const
 {
-    return fs::is_regular_file(fs::path(metadata_path) / path);
+    return createMeta(path)->isFile();
 }
 
 
@@ -230,7 +224,7 @@ void IDiskRemote<Metadata>::moveFile(const String & from_path, const String & to
     if (exists(to_path))
         throw Exception("File already exists: " + to_path, ErrorCodes::FILE_ALREADY_EXISTS);
 
-    fs::rename(fs::path(metadata_path) / from_path, fs::path(metadata_path) / to_path);
+    return createMeta(from_path)->moveFile(to_path);
 }
 
 
@@ -294,23 +288,44 @@ void IDiskRemote<Metadata>::setReadOnly(const String & path)
 
 
 template <typename Metadata>
+void IDiskRemote<Metadata>::setLastModified(const String & path, const Poco::Timestamp & timestamp)
+{
+    return createMeta(path)->setLastModified(timestamp);
+}
+
+
+template <typename Metadata>
+Poco::Timestamp IDiskRemote<Metadata>::getLastModified(const String & path)
+{
+    return createMeta(path)->getLastModified();
+}
+
+
+template <typename Metadata>
 bool IDiskRemote<Metadata>::isDirectory(const String & path) const
 {
-    return fs::is_directory(fs::path(metadata_path) / path);
+    return createMeta(path)->isDirectory();
 }
 
 
 template <typename Metadata>
 void IDiskRemote<Metadata>::createDirectory(const String & path)
 {
-    fs::create_directory(fs::path(metadata_path) / path);
+    createMeta(path)->isDirectory();
 }
 
 
 template <typename Metadata>
 void IDiskRemote<Metadata>::createDirectories(const String & path)
 {
-    fs::create_directories(fs::path(metadata_path) / path);
+    createMeta(path)->createDirectories();
+}
+
+
+template <typename Metadata>
+void IDiskRemote<Metadata>::removeDirectory(const String & path)
+{
+    createMeta(path)->removeDirectory();
 }
 
 
@@ -324,20 +339,17 @@ void IDiskRemote<Metadata>::clearDirectory(const String & path)
 
 
 template <typename Metadata>
-void IDiskRemote<Metadata>::removeDirectory(const String & path)
-{
-    fs::remove(fs::path(metadata_path) / path);
-}
-
-
-template <typename Metadata>
 DiskDirectoryIteratorPtr IDiskRemote<Metadata>::iterateDirectory(const String & path)
 {
-    fs::path meta_path = fs::path(metadata_path) / path;
-    if (fs::exists(meta_path) && fs::is_directory(meta_path))
+    if (this->exists(path) && this->isDirectory(path))
+    {
+        fs::path meta_path = fs::path(metadata_path) / path;
         return std::make_unique<RemoteDiskDirectoryIterator>(meta_path, path);
+    }
     else
+    {
         return std::make_unique<RemoteDiskDirectoryIterator>();
+    }
 }
 
 
@@ -350,20 +362,6 @@ void IDiskRemote<Metadata>::listFiles(const String & path, std::vector<String> &
 
 
 template <typename Metadata>
-void IDiskRemote<Metadata>::setLastModified(const String & path, const Poco::Timestamp & timestamp)
-{
-    FS::setModificationTime(fs::path(metadata_path) / path, timestamp.epochTime());
-}
-
-
-template <typename Metadata>
-Poco::Timestamp IDiskRemote<Metadata>::getLastModified(const String & path)
-{
-    return FS::getModificationTimestamp(fs::path(metadata_path) / path);
-}
-
-
-template <typename Metadata>
 void IDiskRemote<Metadata>::createHardLink(const String & src_path, const String & dst_path)
 {
     /// Increment number of references.
@@ -372,7 +370,7 @@ void IDiskRemote<Metadata>::createHardLink(const String & src_path, const String
     src->save();
 
     /// Create FS hardlink to metadata file.
-    DB::createHardLink(fs::path(metadata_path) / src_path, fs::path(metadata_path) / dst_path);
+    src->createHardLink(dst_path);
 }
 
 

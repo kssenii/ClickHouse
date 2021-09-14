@@ -15,7 +15,7 @@ namespace ErrorCodes
 
 
 template<typename T>
-ReadIndirectBufferFromRemoteFS<T>::ReadIndirectBufferFromRemoteFS(IMetadataPtr metadata_)
+ReadIndirectBufferFromRemoteFS<T>::ReadIndirectBufferFromRemoteFS(VFSMetadataPtr metadata_)
     : metadata(metadata_)
 {
 }
