@@ -186,8 +186,8 @@ IDiskRemote<Metadata>::IDiskRemote(
     size_t thread_pool_size)
     : IDisk(std::make_unique<AsyncExecutor>(log_name_, thread_pool_size))
     , log(&Poco::Logger::get(log_name_ + '(' + getName() + ')'))
-    , name(name_)
     , remote_fs_root_path(remote_fs_root_path_)
+    , name(name_)
     , metadata_path(metadata_path_)
 {
 }

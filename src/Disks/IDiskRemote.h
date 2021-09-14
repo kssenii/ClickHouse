@@ -139,9 +139,8 @@ public:
 
 protected:
     Poco::Logger * log;
-    const String name;
     const String remote_fs_root_path;
-
+    const String name;
     const String metadata_path;
 
 private:

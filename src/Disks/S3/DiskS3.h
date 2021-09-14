@@ -55,7 +55,8 @@ struct DiskS3Settings
  * Files are represented by file in local filesystem (clickhouse_root/disks/disk_name/path/to/file)
  * that contains S3 object key with actual data.
  */
-class DiskS3 final : public IDiskRemote<LocalMetadata>
+template <typename Metadata>
+class DiskS3 final : public IDiskRemote<Metadata>
 {
 public:
     using ObjectMetadata = std::map<std::string, std::string>;

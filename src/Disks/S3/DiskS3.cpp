@@ -158,33 +158,38 @@ private:
     String remote_fs_root_path;
 };
 
-DiskS3::DiskS3(
+template <typename Metadata>
+DiskS3<Metadata>::DiskS3(
     String name_,
     String bucket_,
     String s3_root_path_,
     String metadata_path_,
     SettingsPtr settings_,
     GetDiskSettings settings_getter_)
-    : IDiskRemote<LocalMetadata>(name_, s3_root_path_, metadata_path_, "DiskS3", settings_->thread_pool_size)
+    : IDiskRemote<Metadata>(name_, s3_root_path_, metadata_path_, "DiskS3", settings_->thread_pool_size)
     , bucket(std::move(bucket_))
     , current_settings(std::move(settings_))
     , settings_getter(settings_getter_)
 {
 }
 
-RemoteFSPathKeeperPtr DiskS3::createFSPathKeeper() const
+template <typename Metadata>
+RemoteFSPathKeeperPtr DiskS3<Metadata>::createFSPathKeeper() const
 {
     auto settings = current_settings.get();
     return std::make_shared<S3PathKeeper>(settings->objects_chunk_size_to_delete);
 }
 
-MetadataPtr DiskS3::getRemoteMetadata(const String & path) const
+template <typename Metadata>
+MetadataPtr DiskS3<Metadata>::getRemoteMetadata(const String & path) const
 {
     auto settings = current_settings.get();
-    return std::make_unique<S3Metadata>(remote_fs_root_path, path, settings->client, bucket, settings->s3_min_upload_part_size, settings->s3_max_single_part_upload_size);
+    return std::make_unique<S3Metadata>(this->remote_fs_root_path, path,
+            settings->client, bucket, settings->s3_min_upload_part_size, settings->s3_max_single_part_upload_size);
 }
 
-void DiskS3::removeFromRemoteFS(RemoteFSPathKeeperPtr fs_paths_keeper)
+template <typename Metadata>
+void DiskS3<Metadata>::removeFromRemoteFS(RemoteFSPathKeeperPtr fs_paths_keeper)
 {
     auto settings = current_settings.get();
     auto * s3_paths_keeper = dynamic_cast<S3PathKeeper *>(fs_paths_keeper.get());
@@ -192,7 +197,7 @@ void DiskS3::removeFromRemoteFS(RemoteFSPathKeeperPtr fs_paths_keeper)
     if (s3_paths_keeper)
         s3_paths_keeper->removePaths([&](S3PathKeeper::Chunk && chunk)
         {
-            LOG_TRACE(log, "Remove AWS keys {}", S3PathKeeper::getChunkKeys(chunk));
+            LOG_TRACE(this->log, "Remove AWS keys {}", S3PathKeeper::getChunkKeys(chunk));
             Aws::S3::Model::Delete delkeys;
             delkeys.SetObjects(chunk);
             /// TODO: Make operation idempotent. Do not throw exception if key is already deleted.
@@ -204,16 +209,18 @@ void DiskS3::removeFromRemoteFS(RemoteFSPathKeeperPtr fs_paths_keeper)
         });
 }
 
-void DiskS3::moveFile(const String & from_path, const String & to_path)
+template <typename Metadata>
+void DiskS3<Metadata>::moveFile(const String & from_path, const String & to_path)
 {
     auto settings = current_settings.get();
 
     moveFile(from_path, to_path, settings->send_metadata);
 }
 
-void DiskS3::moveFile(const String & from_path, const String & to_path, bool send_metadata)
+template <typename Metadata>
+void DiskS3<Metadata>::moveFile(const String & from_path, const String & to_path, bool send_metadata)
 {
-    if (exists(to_path))
+    if (this->exists(to_path))
         throw Exception("File already exists: " + to_path, ErrorCodes::FILE_ALREADY_EXISTS);
 
     if (send_metadata)
@@ -226,26 +233,28 @@ void DiskS3::moveFile(const String & from_path, const String & to_path, bool sen
         createFileOperationObject("rename", revision, object_metadata);
     }
 
-    fs::rename(fs::path(metadata_path) / from_path, fs::path(metadata_path) / to_path);
+    fs::rename(fs::path(this->metadata_path) / from_path, fs::path(this->metadata_path) / to_path);
 }
 
-std::unique_ptr<ReadBufferFromFileBase> DiskS3::readFile(const String & path, const ReadSettings & read_settings, size_t) const
+template <typename Metadata>
+std::unique_ptr<ReadBufferFromFileBase> DiskS3<Metadata>::readFile(const String & path, const ReadSettings & read_settings, size_t) const
 {
     auto settings = current_settings.get();
-    auto metadata = readMeta(path);
+    auto metadata = this->readMeta(path);
 
-    LOG_TRACE(log, "Read from file by path: {}. Existing S3 objects: {}",
-        backQuote((fs::path(metadata_path) / path).string()), metadata->remote_fs_objects.size());
+    LOG_TRACE(this->log, "Read from file by path: {}. Existing S3 objects: {}",
+        backQuote((fs::path(this->metadata_path) / path).string()), metadata->remote_fs_objects.size());
 
     auto reader = std::make_unique<ReadIndirectBufferFromS3>(
         settings->client, bucket, metadata, settings->s3_max_single_read_retries, read_settings.remote_fs_buffer_size);
     return std::make_unique<SeekAvoidingReadBuffer>(std::move(reader), settings->min_bytes_for_seek);
 }
 
-std::unique_ptr<WriteBufferFromFileBase> DiskS3::writeFile(const String & path, size_t buf_size, WriteMode mode)
+template <typename Metadata>
+std::unique_ptr<WriteBufferFromFileBase> DiskS3<Metadata>::writeFile(const String & path, size_t buf_size, WriteMode mode)
 {
     auto settings = current_settings.get();
-    auto metadata = readOrCreateMetaForWriting(path, mode);
+    auto metadata = this->readOrCreateMetaForWriting(path, mode);
 
     /// Path to store new S3 object.
     auto s3_path = getRandomName();
@@ -260,10 +269,10 @@ std::unique_ptr<WriteBufferFromFileBase> DiskS3::writeFile(const String & path, 
         s3_path = "r" + revisionToString(revision) + "-file-" + s3_path;
     }
 
-    LOG_TRACE(log,
+    LOG_TRACE(this->log,
               "{} to file by path: {}. S3 path: {}",
               mode == WriteMode::Rewrite ? "Write" : "Append",
-              backQuote((fs::path(metadata_path) / path).string()), (fs::path(remote_fs_root_path) / s3_path).string());
+              backQuote((fs::path(this->metadata_path) / path).string()), (fs::path(this->remote_fs_root_path) / s3_path).string());
 
     auto s3_buffer = std::make_unique<WriteBufferFromS3>(
         settings->client,
@@ -277,13 +286,15 @@ std::unique_ptr<WriteBufferFromFileBase> DiskS3::writeFile(const String & path, 
     return std::make_unique<WriteIndirectBufferFromRemoteFS<WriteBufferFromS3, LocalMetadata>>(std::move(s3_buffer), std::move(metadata), s3_path);
 }
 
-void DiskS3::createHardLink(const String & src_path, const String & dst_path)
+template <typename Metadata>
+void DiskS3<Metadata>::createHardLink(const String & src_path, const String & dst_path)
 {
     auto settings = current_settings.get();
     createHardLink(src_path, dst_path, settings->send_metadata);
 }
 
-void DiskS3::createHardLink(const String & src_path, const String & dst_path, bool send_metadata)
+template <typename Metadata>
+void DiskS3<Metadata>::createHardLink(const String & src_path, const String & dst_path, bool send_metadata)
 {
     /// We don't need to record hardlinks created to shadow folder.
     if (send_metadata && !dst_path.starts_with("shadow/"))
@@ -297,15 +308,16 @@ void DiskS3::createHardLink(const String & src_path, const String & dst_path, bo
     }
 
     /// Increment number of references.
-    auto src = readMeta(src_path);
+    auto src = this->readMeta(src_path);
     ++src->ref_count;
     src->save();
 
     /// Create FS hardlink to metadata file.
-    DB::createHardLink(fs::path(metadata_path) / src_path, fs::path(metadata_path) / dst_path);
+    DB::createHardLink(fs::path(this->metadata_path) / src_path, fs::path(this->metadata_path) / dst_path);
 }
 
-void DiskS3::shutdown()
+template <typename Metadata>
+void DiskS3<Metadata>::shutdown()
 {
     auto settings = current_settings.get();
     /// This call stops any next retry attempts for ongoing S3 requests.
@@ -315,14 +327,15 @@ void DiskS3::shutdown()
     settings->client->DisableRequestProcessing();
 }
 
-void DiskS3::createFileOperationObject(const String & operation_name, UInt64 revision, const DiskS3::ObjectMetadata & metadata)
+template <typename Metadata>
+void DiskS3<Metadata>::createFileOperationObject(const String & operation_name, UInt64 revision, const DiskS3::ObjectMetadata & metadata)
 {
     auto settings = current_settings.get();
     const String key = "operations/r" + revisionToString(revision) + "-" + operation_name;
     WriteBufferFromS3 buffer(
         settings->client,
         bucket,
-        remote_fs_root_path + key,
+        fs::path(this->remote_fs_root_path) / key,
         settings->s3_min_upload_part_size,
         settings->s3_max_single_part_upload_size,
         metadata);
@@ -331,7 +344,8 @@ void DiskS3::createFileOperationObject(const String & operation_name, UInt64 rev
     buffer.finalize();
 }
 
-void DiskS3::startup()
+template <typename Metadata>
+void DiskS3<Metadata>::startup()
 {
     auto settings = current_settings.get();
 
@@ -341,19 +355,20 @@ void DiskS3::startup()
     if (!settings->send_metadata)
         return;
 
-    LOG_INFO(log, "Starting up disk {}", name);
+    LOG_INFO(this->log, "Starting up disk {}", this->name);
 
     restore();
 
-    if (readSchemaVersion(bucket, remote_fs_root_path) < RESTORABLE_SCHEMA_VERSION)
+    if (readSchemaVersion(bucket, this->remote_fs_root_path) < RESTORABLE_SCHEMA_VERSION)
         migrateToRestorableSchema();
 
     findLastRevision();
 
-    LOG_INFO(log, "Disk {} started up", name);
+    LOG_INFO(this->log, "Disk {} started up", this->name);
 }
 
-void DiskS3::findLastRevision()
+template <typename Metadata>
+void DiskS3<Metadata>::findLastRevision()
 {
     /// Construct revision number from high to low bits.
     String revision;
@@ -362,20 +377,21 @@ void DiskS3::findLastRevision()
     {
         auto revision_prefix = revision + "1";
 
-        LOG_TRACE(log, "Check object exists with revision prefix {}", revision_prefix);
+        LOG_TRACE(this->log, "Check object exists with revision prefix {}", revision_prefix);
 
         /// Check file or operation with such revision prefix exists.
-        if (checkObjectExists(bucket, remote_fs_root_path + "r" + revision_prefix)
-            || checkObjectExists(bucket, remote_fs_root_path + "operations/r" + revision_prefix))
+        if (checkObjectExists(bucket, this->remote_fs_root_path + "r" + revision_prefix)
+            || checkObjectExists(bucket, this->remote_fs_root_path + "operations/r" + revision_prefix))
             revision += "1";
         else
             revision += "0";
     }
     revision_counter = static_cast<UInt64>(std::bitset<64>(revision).to_ullong());
-    LOG_INFO(log, "Found last revision number {} for disk {}", revision_counter, name);
+    LOG_INFO(this->log, "Found last revision number {} for disk {}", revision_counter, this->name);
 }
 
-int DiskS3::readSchemaVersion(const String & source_bucket, const String & source_path)
+template <typename Metadata>
+int DiskS3<Metadata>::readSchemaVersion(const String & source_bucket, const String & source_path)
 {
     int version = 0;
     if (!checkObjectExists(source_bucket, fs::path(source_path) / SCHEMA_VERSION_OBJECT))
@@ -385,7 +401,7 @@ int DiskS3::readSchemaVersion(const String & source_bucket, const String & sourc
     ReadBufferFromS3 buffer(
         settings->client,
         source_bucket,
-        source_path + SCHEMA_VERSION_OBJECT,
+        fs::path(source_path) / SCHEMA_VERSION_OBJECT,
         settings->s3_max_single_read_retries,
         DBMS_DEFAULT_BUFFER_SIZE);
 
@@ -394,14 +410,15 @@ int DiskS3::readSchemaVersion(const String & source_bucket, const String & sourc
     return version;
 }
 
-void DiskS3::saveSchemaVersion(const int & version)
+template <typename Metadata>
+void DiskS3<Metadata>::saveSchemaVersion(const int & version)
 {
     auto settings = current_settings.get();
 
     WriteBufferFromS3 buffer(
         settings->client,
         bucket,
-        fs::path(remote_fs_root_path) / SCHEMA_VERSION_OBJECT,
+        fs::path(this->remote_fs_root_path) / SCHEMA_VERSION_OBJECT,
         settings->s3_min_upload_part_size,
         settings->s3_max_single_part_upload_size);
 
@@ -409,35 +426,38 @@ void DiskS3::saveSchemaVersion(const int & version)
     buffer.finalize();
 }
 
-void DiskS3::updateObjectMetadata(const String & key, const ObjectMetadata & metadata)
+template <typename Metadata>
+void DiskS3<Metadata>::updateObjectMetadata(const String & key, const ObjectMetadata & metadata)
 {
     copyObjectImpl(bucket, key, bucket, key, std::nullopt, metadata);
 }
 
-void DiskS3::migrateFileToRestorableSchema(const String & path)
+template <typename Metadata>
+void DiskS3<Metadata>::migrateFileToRestorableSchema(const String & path)
 {
-    LOG_TRACE(log, "Migrate file {} to restorable schema", metadata_path + path);
+    LOG_TRACE(this->log, "Migrate file {} to restorable schema", (fs::path(this->metadata_path) / path).string());
 
-    auto meta = readMeta(path);
+    auto meta = this->readMeta(path);
 
     for (const auto & [key, _] : meta->remote_fs_objects)
     {
         ObjectMetadata metadata {
             {"path", path}
         };
-        updateObjectMetadata(fs::path(remote_fs_root_path) / key, metadata);
+        updateObjectMetadata(fs::path(this->remote_fs_root_path) / key, metadata);
     }
 }
 
-void DiskS3::migrateToRestorableSchemaRecursive(const String & path, Futures & results)
+template <typename Metadata>
+void DiskS3<Metadata>::migrateToRestorableSchemaRecursive(const String & path, Futures & results)
 {
     checkStackSize(); /// This is needed to prevent stack overflow in case of cyclic symlinks.
 
-    LOG_TRACE(log, "Migrate directory {} to restorable schema", metadata_path + path);
+    LOG_TRACE(this->log, "Migrate directory {} to restorable schema", (fs::path(this->metadata_path) / path).string());
 
     bool dir_contains_only_files = true;
-    for (auto it = iterateDirectory(path); it->isValid(); it->next())
-        if (isDirectory(it->path()))
+    for (auto it = this->iterateDirectory(path); it->isValid(); it->next())
+        if (this->isDirectory(it->path()))
         {
             dir_contains_only_files = false;
             break;
@@ -446,9 +466,9 @@ void DiskS3::migrateToRestorableSchemaRecursive(const String & path, Futures & r
     /// The whole directory can be migrated asynchronously.
     if (dir_contains_only_files)
     {
-        auto result = getExecutor().execute([this, path]
+        auto result = this->getExecutor().execute([this, path]
              {
-                 for (auto it = iterateDirectory(path); it->isValid(); it->next())
+                 for (auto it = this->iterateDirectory(path); it->isValid(); it->next())
                      migrateFileToRestorableSchema(it->path());
              });
 
@@ -456,11 +476,11 @@ void DiskS3::migrateToRestorableSchemaRecursive(const String & path, Futures & r
     }
     else
     {
-        for (auto it = iterateDirectory(path); it->isValid(); it->next())
-            if (!isDirectory(it->path()))
+        for (auto it = this->iterateDirectory(path); it->isValid(); it->next())
+            if (!this->isDirectory(it->path()))
             {
                 auto source_path = it->path();
-                auto result = getExecutor().execute([this, source_path]
+                auto result = this->getExecutor().execute([this, source_path]
                     {
                         migrateFileToRestorableSchema(source_path);
                     });
@@ -472,17 +492,18 @@ void DiskS3::migrateToRestorableSchemaRecursive(const String & path, Futures & r
     }
 }
 
-void DiskS3::migrateToRestorableSchema()
+template <typename Metadata>
+void DiskS3<Metadata>::migrateToRestorableSchema()
 {
     try
     {
-        LOG_INFO(log, "Start migration to restorable schema for disk {}", name);
+        LOG_INFO(this->log, "Start migration to restorable schema for disk {}", this->name);
 
         Futures results;
 
         for (const auto & root : data_roots)
-            if (exists(root))
-                migrateToRestorableSchemaRecursive(root + '/', results);
+            if (this->exists(root))
+                migrateToRestorableSchemaRecursive(root + "/", results);
 
         for (auto & result : results)
             result.wait();
@@ -493,13 +514,14 @@ void DiskS3::migrateToRestorableSchema()
     }
     catch (const Exception &)
     {
-        tryLogCurrentException(log, fmt::format("Failed to migrate to restorable schema for disk {}", name));
+        tryLogCurrentException(this->log, fmt::format("Failed to migrate to restorable schema for disk {}", this->name));
 
         throw;
     }
 }
 
-bool DiskS3::checkObjectExists(const String & source_bucket, const String & prefix) const
+template <typename Metadata>
+bool DiskS3<Metadata>::checkObjectExists(const String & source_bucket, const String & prefix) const
 {
     auto settings = current_settings.get();
     Aws::S3::Model::ListObjectsV2Request request;
@@ -513,7 +535,8 @@ bool DiskS3::checkObjectExists(const String & source_bucket, const String & pref
     return !outcome.GetResult().GetContents().empty();
 }
 
-bool DiskS3::checkUniqueId(const String & id) const
+template <typename Metadata>
+bool DiskS3<Metadata>::checkUniqueId(const String & id) const
 {
     auto settings = current_settings.get();
     /// Check that we have right s3 and have access rights
@@ -531,7 +554,8 @@ bool DiskS3::checkUniqueId(const String & id) const
     return false;
 }
 
-Aws::S3::Model::HeadObjectResult DiskS3::headObject(const String & source_bucket, const String & key) const
+template <typename Metadata>
+Aws::S3::Model::HeadObjectResult DiskS3<Metadata>::headObject(const String & source_bucket, const String & key) const
 {
     auto settings = current_settings.get();
     Aws::S3::Model::HeadObjectRequest request;
@@ -544,7 +568,8 @@ Aws::S3::Model::HeadObjectResult DiskS3::headObject(const String & source_bucket
     return outcome.GetResultWithOwnership();
 }
 
-void DiskS3::listObjects(const String & source_bucket, const String & source_path, std::function<bool(const Aws::S3::Model::ListObjectsV2Result &)> callback) const
+template <typename Metadata>
+void DiskS3<Metadata>::listObjects(const String & source_bucket, const String & source_path, std::function<bool(const Aws::S3::Model::ListObjectsV2Result &)> callback) const
 {
     auto settings = current_settings.get();
     Aws::S3::Model::ListObjectsV2Request request;
@@ -567,7 +592,8 @@ void DiskS3::listObjects(const String & source_bucket, const String & source_pat
     } while (outcome.GetResult().GetIsTruncated());
 }
 
-void DiskS3::copyObject(const String & src_bucket, const String & src_key, const String & dst_bucket, const String & dst_key,
+template <typename Metadata>
+void DiskS3<Metadata>::copyObject(const String & src_bucket, const String & src_key, const String & dst_bucket, const String & dst_key,
     std::optional<Aws::S3::Model::HeadObjectResult> head) const
 {
     if (head && (head->GetContentLength() >= static_cast<Int64>(5_GiB)))
@@ -576,13 +602,14 @@ void DiskS3::copyObject(const String & src_bucket, const String & src_key, const
         copyObjectImpl(src_bucket, src_key, dst_bucket, dst_key);
 }
 
-void DiskS3::copyObjectImpl(const String & src_bucket, const String & src_key, const String & dst_bucket, const String & dst_key,
+template <typename Metadata>
+void DiskS3<Metadata>::copyObjectImpl(const String & src_bucket, const String & src_key, const String & dst_bucket, const String & dst_key,
     std::optional<Aws::S3::Model::HeadObjectResult> head,
     std::optional<std::reference_wrapper<const ObjectMetadata>> metadata) const
 {
     auto settings = current_settings.get();
     Aws::S3::Model::CopyObjectRequest request;
-    request.SetCopySource(src_bucket + "/" + src_key);
+    request.SetCopySource(fs::path(src_bucket) / src_key);
     request.SetBucket(dst_bucket);
     request.SetKey(dst_key);
     if (metadata)
@@ -602,11 +629,12 @@ void DiskS3::copyObjectImpl(const String & src_bucket, const String & src_key, c
     throwIfError(outcome);
 }
 
-void DiskS3::copyObjectMultipartImpl(const String & src_bucket, const String & src_key, const String & dst_bucket, const String & dst_key,
+template <typename Metadata>
+void DiskS3<Metadata>::copyObjectMultipartImpl(const String & src_bucket, const String & src_key, const String & dst_bucket, const String & dst_key,
     std::optional<Aws::S3::Model::HeadObjectResult> head,
     std::optional<std::reference_wrapper<const ObjectMetadata>> metadata) const
 {
-    LOG_TRACE(log, "Multipart copy upload has created. Src Bucket: {}, Src Key: {}, Dst Bucket: {}, Dst Key: {}, Metadata: {}",
+    LOG_TRACE(this->log, "Multipart copy upload has created. Src Bucket: {}, Src Key: {}, Dst Bucket: {}, Dst Key: {}, Metadata: {}",
         src_bucket, src_key, dst_bucket, dst_key, metadata ? "REPLACE" : "NOT_SET");
 
     auto settings = current_settings.get();
@@ -680,12 +708,13 @@ void DiskS3::copyObjectMultipartImpl(const String & src_bucket, const String & s
 
         throwIfError(outcome);
 
-        LOG_TRACE(log, "Multipart copy upload has completed. Src Bucket: {}, Src Key: {}, Dst Bucket: {}, Dst Key: {}, "
+        LOG_TRACE(this->log, "Multipart copy upload has completed. Src Bucket: {}, Src Key: {}, Dst Bucket: {}, Dst Key: {}, "
             "Upload_id: {}, Parts: {}", src_bucket, src_key, dst_bucket, dst_key, multipart_upload_id, part_tags.size());
     }
 }
 
-struct DiskS3::RestoreInformation
+template <typename Metadata>
+struct DiskS3<Metadata>::RestoreInformation
 {
     UInt64 revision = LATEST_REVISION;
     String source_bucket;
@@ -693,9 +722,10 @@ struct DiskS3::RestoreInformation
     bool detached = false;
 };
 
-void DiskS3::readRestoreInformation(DiskS3::RestoreInformation & restore_information)
+template <typename Metadata>
+void DiskS3<Metadata>::readRestoreInformation(DiskS3<Metadata>::RestoreInformation & restore_information)
 {
-    ReadBufferFromFile buffer(metadata_path + RESTORE_FILE_NAME, 512);
+    ReadBufferFromFile buffer(fs::path(this->metadata_path) / RESTORE_FILE_NAME, 512);
     buffer.next();
 
     try
@@ -740,21 +770,22 @@ void DiskS3::readRestoreInformation(DiskS3::RestoreInformation & restore_informa
     }
     catch (const Exception &)
     {
-        tryLogCurrentException(log, "Failed to read restore information");
+        tryLogCurrentException(this->log, "Failed to read restore information");
         throw;
     }
 }
 
-void DiskS3::restore()
+template <typename Metadata>
+void DiskS3<Metadata>::restore()
 {
-    if (!exists(RESTORE_FILE_NAME))
+    if (!this->exists(RESTORE_FILE_NAME))
         return;
 
     try
     {
         RestoreInformation information;
         information.source_bucket = bucket;
-        information.source_path = remote_fs_root_path;
+        information.source_path = this->remote_fs_root_path;
 
         readRestoreInformation(information);
         if (information.revision == 0)
@@ -766,48 +797,49 @@ void DiskS3::restore()
         {
             /// In this case we need to additionally cleanup S3 from objects with later revision.
             /// Will be simply just restore to different path.
-            if (information.source_path == remote_fs_root_path && information.revision != LATEST_REVISION)
+            if (information.source_path == this->remote_fs_root_path && information.revision != LATEST_REVISION)
                 throw Exception("Restoring to the same bucket and path is allowed if revision is latest (0)", ErrorCodes::BAD_ARGUMENTS);
 
             /// This case complicates S3 cleanup in case of unsuccessful restore.
-            if (information.source_path != remote_fs_root_path && remote_fs_root_path.starts_with(information.source_path))
+            if (information.source_path != this->remote_fs_root_path && this->remote_fs_root_path.starts_with(information.source_path))
                 throw Exception("Restoring to the same bucket is allowed only if source path is not a sub-path of configured path in S3 disk", ErrorCodes::BAD_ARGUMENTS);
         }
 
-        LOG_INFO(log, "Starting to restore disk {}. Revision: {}, Source bucket: {}, Source path: {}",
-                 name, information.revision, information.source_bucket, information.source_path);
+        LOG_INFO(this->log, "Starting to restore disk {}. Revision: {}, Source bucket: {}, Source path: {}",
+                 this->name, information.revision, information.source_bucket, information.source_path);
 
         if (readSchemaVersion(information.source_bucket, information.source_path) < RESTORABLE_SCHEMA_VERSION)
             throw Exception("Source bucket doesn't have restorable schema.", ErrorCodes::BAD_ARGUMENTS);
 
-        LOG_INFO(log, "Removing old metadata...");
+        LOG_INFO(this->log, "Removing old metadata...");
 
-        bool cleanup_s3 = information.source_bucket != bucket || information.source_path != remote_fs_root_path;
+        bool cleanup_s3 = information.source_bucket != bucket || information.source_path != this->remote_fs_root_path;
         for (const auto & root : data_roots)
-            if (exists(root))
-                removeSharedRecursive(root + '/', !cleanup_s3);
+            if (this->exists(root))
+                this->removeSharedRecursive(fs::path(root) / "", !cleanup_s3);
 
         restoreFiles(information);
         restoreFileOperations(information);
 
-        fs::path restore_file = fs::path(metadata_path) / RESTORE_FILE_NAME;
+        fs::path restore_file = fs::path(this->metadata_path) / RESTORE_FILE_NAME;
         fs::remove(restore_file);
 
         saveSchemaVersion(RESTORABLE_SCHEMA_VERSION);
 
-        LOG_INFO(log, "Restore disk {} finished", name);
+        LOG_INFO(this->log, "Restore disk {} finished", this->name);
     }
     catch (const Exception &)
     {
-        tryLogCurrentException(log, fmt::format("Failed to restore disk {}", name));
+        tryLogCurrentException(this->log, fmt::format("Failed to restore disk {}", this->name));
 
         throw;
     }
 }
 
-void DiskS3::restoreFiles(const RestoreInformation & restore_information)
+template <typename Metadata>
+void DiskS3<Metadata>::restoreFiles(const RestoreInformation & restore_information)
 {
-    LOG_INFO(log, "Starting restore files for disk {}", name);
+    LOG_INFO(this->log, "Starting restore files for disk {}", this->name);
 
     std::vector<std::future<void>> results;
     auto restore_files = [this, &restore_information, &results](auto list_result)
@@ -831,7 +863,7 @@ void DiskS3::restoreFiles(const RestoreInformation & restore_information)
 
         if (!keys.empty())
         {
-            auto result = getExecutor().execute([this, &restore_information, keys]()
+            auto result = this->getExecutor().execute([this, &restore_information, keys]()
             {
                 processRestoreFiles(restore_information.source_bucket, restore_information.source_path, keys);
             });
@@ -850,10 +882,11 @@ void DiskS3::restoreFiles(const RestoreInformation & restore_information)
     for (auto & result : results)
         result.get();
 
-    LOG_INFO(log, "Files are restored for disk {}", name);
+    LOG_INFO(this->log, "Files are restored for disk {}", this->name);
 }
 
-void DiskS3::processRestoreFiles(const String & source_bucket, const String & source_path, Strings keys)
+template <typename Metadata>
+void DiskS3<Metadata>::processRestoreFiles(const String & source_bucket, const String & source_path, Strings keys)
 {
     for (const auto & key : keys)
     {
@@ -865,35 +898,36 @@ void DiskS3::processRestoreFiles(const String & source_bucket, const String & so
         if (path_entry == object_metadata.end())
         {
             /// Such keys can remain after migration, we can skip them.
-            LOG_WARNING(log, "Skip key {} because it doesn't have 'path' in metadata", key);
+            LOG_WARNING(this->log, "Skip key {} because it doesn't have 'path' in metadata", key);
             continue;
         }
 
         const auto & path = path_entry->second;
 
-        createDirectories(directoryPath(path));
-        auto metadata = createMeta(path);
+        this->createDirectories(directoryPath(path));
+        auto metadata = this->createMeta(path);
         auto relative_key = shrinkKey(source_path, key);
 
         /// Copy object if we restore to different bucket / path.
-        if (bucket != source_bucket || remote_fs_root_path != source_path)
-            copyObject(source_bucket, key, bucket, remote_fs_root_path + relative_key, head_result);
+        if (bucket != source_bucket || this->remote_fs_root_path != source_path)
+            copyObject(source_bucket, key, bucket, fs::path(this->remote_fs_root_path) / relative_key, head_result);
 
         metadata->addObject(relative_key, head_result.GetContentLength());
         metadata->save();
 
-        LOG_TRACE(log, "Restored file {}", path);
+        LOG_TRACE(this->log, "Restored file {}", path);
     }
 }
 
-void DiskS3::restoreFileOperations(const RestoreInformation & restore_information)
+template <typename Metadata>
+void DiskS3<Metadata>::restoreFileOperations(const RestoreInformation & restore_information)
 {
     auto settings = current_settings.get();
 
-    LOG_INFO(log, "Starting restore file operations for disk {}", name);
+    LOG_INFO(this->log, "Starting restore file operations for disk {}", this->name);
 
     /// Enable recording file operations if we restore to different bucket / path.
-    bool send_metadata = bucket != restore_information.source_bucket || remote_fs_root_path != restore_information.source_path;
+    bool send_metadata = bucket != restore_information.source_bucket || this->remote_fs_root_path != restore_information.source_path;
 
     std::set<String> renames;
     auto restore_file_operations = [this, &restore_information, &renames, &send_metadata](auto list_result)
@@ -908,7 +942,7 @@ void DiskS3::restoreFileOperations(const RestoreInformation & restore_informatio
             const auto [revision, operation] = extractRevisionAndOperationFromKey(key);
             if (revision == UNKNOWN_REVISION)
             {
-                LOG_WARNING(log, "Skip key {} with unknown revision", key);
+                LOG_WARNING(this->log, "Skip key {} with unknown revision", key);
                 continue;
             }
 
@@ -926,12 +960,12 @@ void DiskS3::restoreFileOperations(const RestoreInformation & restore_informatio
             {
                 auto from_path = object_metadata["from_path"];
                 auto to_path = object_metadata["to_path"];
-                if (exists(from_path))
+                if (this->exists(from_path))
                 {
                     moveFile(from_path, to_path, send_metadata);
-                    LOG_TRACE(log, "Revision {}. Restored rename {} -> {}", revision, from_path, to_path);
+                    LOG_TRACE(this->log, "Revision {}. Restored rename {} -> {}", revision, from_path, to_path);
 
-                    if (restore_information.detached && isDirectory(to_path))
+                    if (restore_information.detached && this->isDirectory(to_path))
                     {
                         /// Sometimes directory paths are passed without trailing '/'. We should keep them in one consistent way.
                         if (!from_path.ends_with('/'))
@@ -952,11 +986,11 @@ void DiskS3::restoreFileOperations(const RestoreInformation & restore_informatio
             {
                 auto src_path = object_metadata["src_path"];
                 auto dst_path = object_metadata["dst_path"];
-                if (exists(src_path))
+                if (this->exists(src_path))
                 {
-                    createDirectories(directoryPath(dst_path));
+                    this->createDirectories(directoryPath(dst_path));
                     createHardLink(src_path, dst_path, send_metadata);
-                    LOG_TRACE(log, "Revision {}. Restored hardlink {} -> {}", revision, src_path, dst_path);
+                    LOG_TRACE(this->log, "Revision {}. Restored hardlink {} -> {}", revision, src_path, dst_path);
                 }
             }
         }
@@ -965,7 +999,7 @@ void DiskS3::restoreFileOperations(const RestoreInformation & restore_informatio
     };
 
     /// Execute.
-    listObjects(restore_information.source_bucket, restore_information.source_path + "operations/", restore_file_operations);
+    listObjects(restore_information.source_bucket, fs::path(restore_information.source_path) / "operations/", restore_file_operations);
 
     if (restore_information.detached)
     {
@@ -987,10 +1021,10 @@ void DiskS3::restoreFileOperations(const RestoreInformation & restore_informatio
 
             auto detached_path = pathToDetached(path);
 
-            LOG_TRACE(log, "Move directory to 'detached' {} -> {}", path, detached_path);
+            LOG_TRACE(this->log, "Move directory to 'detached' {} -> {}", path, detached_path);
 
-            fs::path from_path = fs::path(metadata_path) / path;
-            fs::path to_path = fs::path(metadata_path) / detached_path;
+            fs::path from_path = fs::path(this->metadata_path) / path;
+            fs::path to_path = fs::path(this->metadata_path) / detached_path;
             if (path.ends_with('/'))
                 to_path /= from_path.parent_path().filename();
             else
@@ -1001,10 +1035,11 @@ void DiskS3::restoreFileOperations(const RestoreInformation & restore_informatio
         }
     }
 
-    LOG_INFO(log, "File operations restored for disk {}", name);
+    LOG_INFO(this->log, "File operations restored for disk {}", this->name);
 }
 
-std::tuple<UInt64, String> DiskS3::extractRevisionAndOperationFromKey(const String & key)
+template <typename Metadata>
+std::tuple<UInt64, String> DiskS3<Metadata>::extractRevisionAndOperationFromKey(const String & key)
 {
     String revision_str;
     String operation;
@@ -1014,7 +1049,8 @@ std::tuple<UInt64, String> DiskS3::extractRevisionAndOperationFromKey(const Stri
     return {(revision_str.empty() ? UNKNOWN_REVISION : static_cast<UInt64>(std::bitset<64>(revision_str).to_ullong())), operation};
 }
 
-String DiskS3::shrinkKey(const String & path, const String & key)
+template <typename Metadata>
+String DiskS3<Metadata>::shrinkKey(const String & path, const String & key)
 {
     if (!key.starts_with(path))
         throw Exception("The key " + key + " prefix mismatch with given " + path, ErrorCodes::LOGICAL_ERROR);
@@ -1022,33 +1058,37 @@ String DiskS3::shrinkKey(const String & path, const String & key)
     return key.substr(path.length());
 }
 
-String DiskS3::revisionToString(UInt64 revision)
+template <typename Metadata>
+String DiskS3<Metadata>::revisionToString(UInt64 revision)
 {
     return std::bitset<64>(revision).to_string();
 }
 
-String DiskS3::pathToDetached(const String & source_path)
+template <typename Metadata>
+String DiskS3<Metadata>::pathToDetached(const String & source_path)
 {
     if (source_path.ends_with('/'))
         return fs::path(source_path).parent_path().parent_path() / "detached/";
     return fs::path(source_path).parent_path() / "detached/";
 }
 
-void DiskS3::onFreeze(const String & path)
+template <typename Metadata>
+void DiskS3<Metadata>::onFreeze(const String & path)
 {
-    createDirectories(path);
-    WriteBufferFromFile revision_file_buf(metadata_path + path + "revision.txt", 32);
+    this->createDirectories(path);
+    WriteBufferFromFile revision_file_buf(fs::path(this->metadata_path) / path / "revision.txt", 32);
     writeIntText(revision_counter.load(), revision_file_buf);
     revision_file_buf.finalize();
 }
 
-void DiskS3::applyNewSettings(const Poco::Util::AbstractConfiguration & config, ContextPtr context, const String &, const DisksMap &)
+template <typename Metadata>
+void DiskS3<Metadata>::applyNewSettings(const Poco::Util::AbstractConfiguration & config, ContextPtr context, const String &, const DisksMap &)
 {
-    auto new_settings = settings_getter(config, "storage_configuration.disks." + name, context);
+    auto new_settings = settings_getter(config, "storage_configuration.disks." + this->name, context);
 
     current_settings.set(std::move(new_settings));
 
-    if (AsyncExecutor * exec = dynamic_cast<AsyncExecutor*>(&getExecutor()))
+    if (AsyncExecutor * exec = dynamic_cast<AsyncExecutor*>(&this->getExecutor()))
         exec->setMaxThreads(current_settings.get()->thread_pool_size);
 }
 
@@ -1074,6 +1114,14 @@ DiskS3Settings::DiskS3Settings(
 {
 }
 
+
+template
+class DiskS3<LocalMetadata>;
+
+template
+class DiskS3<S3Metadata>;
+
 }
+
 
 #endif

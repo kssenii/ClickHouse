@@ -178,16 +178,33 @@ void registerDiskS3(DiskFactory & factory)
         if (uri.key.back() != '/')
             throw Exception("S3 path must ends with '/', but '" + uri.key + "' doesn't.", ErrorCodes::BAD_ARGUMENTS);
 
-        String metadata_path = config.getString(config_prefix + ".metadata_path", context->getPath() + "disks/" + name + "/");
+        String metadata_path = config.getString(config_prefix + ".metadata_path", fs::path(context->getPath()) / "disks" / name / "");
         fs::create_directories(metadata_path);
 
-        std::shared_ptr<IDisk> s3disk = std::make_shared<DiskS3>(
-            name,
-            uri.bucket,
-            uri.key,
-            metadata_path,
-            getSettings(config, config_prefix, context),
-            getSettings);
+        bool remote_metadata = config.getBool(config_prefix + ".remote_metadata", false);
+
+        DiskPtr s3disk;
+
+        if (remote_metadata)
+        {
+            s3disk = std::make_shared<DiskS3<S3Metadata>>(
+                name,
+                uri.bucket,
+                uri.key,
+                metadata_path,
+                getSettings(config, config_prefix, context),
+                getSettings);
+        }
+        else
+        {
+            s3disk = std::make_shared<DiskS3<LocalMetadata>>(
+                name,
+                uri.bucket,
+                uri.key,
+                metadata_path,
+                getSettings(config, config_prefix, context),
+                getSettings);
+        }
 
         /// This code is used only to check access to the corresponding disk.
         if (!config.getBool(config_prefix + ".skip_access_check", false))
@@ -203,7 +220,7 @@ void registerDiskS3(DiskFactory & factory)
 
         if (cache_enabled)
         {
-            String cache_path = config.getString(config_prefix + ".cache_path", context->getPath() + "disks/" + name + "/cache/");
+            String cache_path = config.getString(config_prefix + ".cache_path", fs::path(context->getPath()) / "disks" / name / "cache/");
 
             if (metadata_path == cache_path)
                 throw Exception("Metadata and cache path should be different: " + metadata_path, ErrorCodes::BAD_ARGUMENTS);
