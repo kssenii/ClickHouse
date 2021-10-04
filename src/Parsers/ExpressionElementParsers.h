@@ -431,6 +431,17 @@ protected:
 };
 
 
+/**
+  * Parse query with EXISTS expression.
+  */
+class ParserExistsExpression : public IParserBase
+{
+protected:
+    const char * getName() const override { return "exists expression"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
+
 /** The expression element is one of: an expression in parentheses, an array, a literal, a function, an identifier, an asterisk.
   */
 class ParserExpressionElement : public IParserBase
