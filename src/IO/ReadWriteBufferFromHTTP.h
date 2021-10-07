@@ -2,10 +2,12 @@
 
 #include <functional>
 #include <base/types.h>
+#include <base/sleep.h>
 #include <IO/ConnectionTimeouts.h>
 #include <IO/HTTPCommon.h>
 #include <IO/ReadBuffer.h>
 #include <IO/ReadBufferFromIStream.h>
+#include <IO/ReadSettings.h>
 #include <Poco/Any.h>
 #include <Poco/Net/HTTPBasicCredentials.h>
 #include <Poco/Net/HTTPClientSession.h>
@@ -101,6 +103,9 @@ namespace detail
         RemoteHostFilter remote_host_filter;
         std::function<void(size_t)> next_callback;
 
+        size_t buffer_size;
+        ReadSettings settings;
+
         std::istream * call(Poco::URI uri_, Poco::Net::HTTPResponse & response)
         {
             // With empty path poco will send "POST  HTTP/1.1" its bug.
@@ -159,6 +164,7 @@ namespace detail
             OutStreamCallback out_stream_callback_ = {},
             const Poco::Net::HTTPBasicCredentials & credentials_ = {},
             size_t buffer_size_ = DBMS_DEFAULT_BUFFER_SIZE,
+            const ReadSettings & settings_ = {},
             HTTPHeaderEntries http_header_entries_ = {},
             const RemoteHostFilter & remote_host_filter_ = {})
             : ReadBuffer(nullptr, 0)
@@ -169,9 +175,15 @@ namespace detail
             , credentials {credentials_}
             , http_header_entries {http_header_entries_}
             , remote_host_filter {remote_host_filter_}
+            , buffer_size {buffer_size_}
+            , settings {settings_}
+        {
+            initialize();
+        }
+
+        void initialize()
         {
             Poco::Net::HTTPResponse response;
-
             istr = call(uri, response);
 
             while (isRedirect(response.getStatus()))
@@ -186,7 +198,7 @@ namespace detail
 
             try
             {
-                impl = std::make_unique<ReadBufferFromIStream>(*istr, buffer_size_);
+                impl = std::make_unique<ReadBufferFromIStream>(*istr, buffer_size);
             }
             catch (const Poco::Exception & e)
             {
@@ -202,10 +214,49 @@ namespace detail
         {
             if (next_callback)
                 next_callback(count());
+
             if (!working_buffer.empty())
                 impl->position() = position();
-            if (!impl->next())
+
+            bool result = false;
+            bool successful_read = false;
+            size_t milliseconds_to_wait = settings.http_retry_initial_backoff_ms;
+
+            /// Default http_max_tries = 1.
+            for (size_t i = 0; i < settings.http_max_tries; ++i)
+            {
+                while (milliseconds_to_wait < settings.http_retry_max_backoff_ms)
+                {
+                    try
+                    {
+                        result = impl->next();
+                        successful_read = true;
+                        break;
+                    }
+                    catch (const Poco::Exception &)
+                    {
+                        if (!settings.http_retriable_read || i == settings.http_max_tries - 1)
+                            throw;
+
+                        tryLogCurrentException(__PRETTY_FUNCTION__);
+                        impl.reset();
+
+                        sleepForMilliseconds(milliseconds_to_wait);
+                        milliseconds_to_wait *= 2;
+
+                        /// Reconnect.
+                        initialize();
+                    }
+                }
+
+                if (successful_read)
+                    break;
+                milliseconds_to_wait = settings.http_retry_initial_backoff_ms;
+            }
+
+            if (!result)
                 return false;
+
             internal_buffer = impl->buffer();
             working_buffer = internal_buffer;
             return true;
@@ -270,10 +321,11 @@ public:
         const UInt64 max_redirects = 0,
         const Poco::Net::HTTPBasicCredentials & credentials_ = {},
         size_t buffer_size_ = DBMS_DEFAULT_BUFFER_SIZE,
+        const ReadSettings & settings_ = {},
         const HTTPHeaderEntries & http_header_entries_ = {},
         const RemoteHostFilter & remote_host_filter_ = {})
         : Parent(std::make_shared<UpdatableSession>(uri_, timeouts, max_redirects),
-            uri_, method_, out_stream_callback_, credentials_, buffer_size_, http_header_entries_, remote_host_filter_)
+            uri_, method_, out_stream_callback_, credentials_, buffer_size_, settings_, http_header_entries_, remote_host_filter_)
     {
     }
 };
