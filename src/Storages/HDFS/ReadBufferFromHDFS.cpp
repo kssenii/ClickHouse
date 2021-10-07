@@ -61,6 +61,14 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
         hdfsCloseFile(fs.get(), fin);
     }
 
+    std::optional<size_t> getTotalSizeToRead() const override
+    {
+        auto file_info = hdfsGetPathInfo(fs.get(), hdfs_file_path.c_str());
+        if (!file_info)
+            return std::nullopt;
+        return file_info->mSize;
+    }
+
     void initialize() const
     {
         if (!offset)
@@ -99,15 +107,16 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
     off_t seek(off_t offset_, int whence) override
     {
         if (initialized)
-            throw Exception("Seek is allowed only before first read attempt from the buffer.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+        {
+            initialized = false;
+            // throw Exception("Seek is allowed only before first read attempt from the buffer.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+        }
 
         if (whence != SEEK_SET)
             throw Exception("Only SEEK_SET mode is allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
 
         if (offset_ < 0)
             throw Exception(ErrorCodes::SEEK_POSITION_OUT_OF_BOUND, "Seek position is out of bounds. Offset: {}", std::to_string(offset_));
-
-        offset = offset_;
 
         return offset;
     }
@@ -144,15 +153,59 @@ bool ReadBufferFromHDFS::nextImpl()
 }
 
 
-off_t ReadBufferFromHDFS::seek(off_t off, int whence)
+off_t ReadBufferFromHDFS::seek(off_t offset_, int whence)
 {
-    return impl->seek(off, whence);
+    if (whence == SEEK_CUR)
+    {
+        /// If position within current working buffer - shift pos.
+        if (!working_buffer.empty() && (getPosition() + offset_) < impl->offset)
+        {
+            pos += offset_;
+            return getPosition();
+        }
+        else
+        {
+            impl->offset += offset_;
+        }
+    }
+    else if (whence == SEEK_SET)
+    {
+        /// If position is within current working buffer - shift pos.
+        if (!working_buffer.empty()
+            && size_t(offset_) >= impl->offset - working_buffer.size()
+            && offset_ < impl->offset)
+        {
+            pos = working_buffer.end() - (impl->offset - offset_);
+
+            assert(pos >= working_buffer.begin());
+            assert(pos <= working_buffer.end());
+
+            return getPosition();
+        }
+        else
+        {
+            impl->offset = offset_;
+            // if (size_t(offset) < prev + 2*buffer_size)
+            //     return getPosition();
+        }
+    }
+    else
+        throw Exception("Only SEEK_SET or SEEK_CUR modes are allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+
+    pos = working_buffer.end();
+    impl->seek(offset_, whence);
+    return impl->offset;
 }
 
 
 off_t ReadBufferFromHDFS::getPosition()
 {
     return impl->getPosition() - available();
+}
+
+std::optional<size_t> ReadBufferFromHDFS::getTotalSizeToRead() const
+{
+    return impl->getTotalSizeToRead();
 }
 
 }

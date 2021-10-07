@@ -44,10 +44,17 @@ arrow::Status ArrowBufferedOutputStream::Write(const void * data, int64_t length
 RandomAccessFileFromSeekableReadBuffer::RandomAccessFileFromSeekableReadBuffer(SeekableReadBuffer & in_, off_t file_size_)
     : in{in_}, file_size{file_size_}, is_open{true}
 {
+    std::cerr << "================================= random access file from seekable read buffer ================================\n\n";
 }
 
 arrow::Result<int64_t> RandomAccessFileFromSeekableReadBuffer::GetSize()
 {
+    if (!file_size)
+    {
+        auto size = in.getTotalSizeToRead();
+        file_size = *size;
+        std::cerr << "\n\ngot file size: " << file_size << std::endl;
+    }
     return arrow::Result<int64_t>(file_size);
 }
 
@@ -80,6 +87,7 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> RandomAccessFileFromSeekableReadBu
 
 arrow::Status RandomAccessFileFromSeekableReadBuffer::Seek(int64_t position)
 {
+    std::cerr << "\n\n\narrow inut stream from read buffer as arrow SEEK!!!!!!!\n\n";
     in.seek(position, SEEK_SET);
     return arrow::Status::OK();
 }
@@ -87,10 +95,12 @@ arrow::Status RandomAccessFileFromSeekableReadBuffer::Seek(int64_t position)
 
 ArrowInputStreamFromReadBuffer::ArrowInputStreamFromReadBuffer(ReadBuffer & in_) : in(in_), is_open{true}
 {
+    std::cerr << "\n\n\narrow inut stream from read buffer: " << typeid(in_).name() << std::endl;
 }
 
 arrow::Result<int64_t> ArrowInputStreamFromReadBuffer::Read(int64_t nbytes, void * out)
 {
+    std::cerr << "\n\n\narrow inut stream from read buffer read\n\n";
     return in.readBig(reinterpret_cast<char *>(out), nbytes);
 }
 
@@ -112,6 +122,7 @@ arrow::Status ArrowInputStreamFromReadBuffer::Abort()
 
 arrow::Result<int64_t> ArrowInputStreamFromReadBuffer::Tell() const
 {
+    std::cerr << "\n\n\narrow inut stream from read buffer tell\n\n";
     return in.count();
 }
 
@@ -123,6 +134,7 @@ arrow::Status ArrowInputStreamFromReadBuffer::Close()
 
 std::shared_ptr<arrow::io::RandomAccessFile> asArrowFile(ReadBuffer & in)
 {
+    std::cerr << "\n\n\narrow inut stream from read buffer as arrow file: " << typeid(in).name() << std::endl;
     if (auto * fd_in = dynamic_cast<ReadBufferFromFileDescriptor *>(&in))
     {
         struct stat stat;
@@ -130,6 +142,12 @@ std::shared_ptr<arrow::io::RandomAccessFile> asArrowFile(ReadBuffer & in)
         // if fd is a regular file i.e. not stdin
         if (res == 0 && S_ISREG(stat.st_mode))
             return std::make_shared<RandomAccessFileFromSeekableReadBuffer>(*fd_in, stat.st_size);
+    }
+    else if (auto * seekable_read_buf = dynamic_cast<SeekableReadBuffer *>(&in))
+    {
+        std::cerr << "\n\nFILE IS SEEKABLE\n\n";
+        /// Size is not passed, it will be set lazily.
+        return std::make_shared<RandomAccessFileFromSeekableReadBuffer>(*seekable_read_buf, 0);
     }
 
     // fallback to loading the entire file in memory

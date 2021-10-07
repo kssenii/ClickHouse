@@ -5,13 +5,24 @@
 namespace DB
 {
 
-class SeekableReadBuffer : public ReadBuffer
+class ReadBufferWithKnownSize : public ReadBuffer
+{
+public:
+    ReadBufferWithKnownSize(Position ptr, size_t size)
+        : ReadBuffer(ptr, size) {}
+    ReadBufferWithKnownSize(Position ptr, size_t size, size_t offset)
+        : ReadBuffer(ptr, size, offset) {}
+
+    virtual std::optional<size_t> getTotalSizeToRead() const = 0;
+};
+
+class SeekableReadBuffer : public ReadBufferWithKnownSize
 {
 public:
     SeekableReadBuffer(Position ptr, size_t size)
-        : ReadBuffer(ptr, size) {}
+        : ReadBufferWithKnownSize(ptr, size) {}
     SeekableReadBuffer(Position ptr, size_t size, size_t offset)
-        : ReadBuffer(ptr, size, offset) {}
+        : ReadBufferWithKnownSize(ptr, size, offset) {}
 
     /**
      * Shifts buffer current position to given offset.
@@ -31,6 +42,8 @@ public:
      * @return Offset from the begin of the underlying buffer / file corresponds to the buffer current position.
      */
     virtual off_t getPosition() = 0;
+
+    std::optional<size_t> getTotalSizeToRead() const override { return std::nullopt; }
 };
 
 }

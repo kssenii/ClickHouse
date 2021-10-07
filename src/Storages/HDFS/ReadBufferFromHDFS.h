@@ -37,6 +37,8 @@ public:
 
     off_t getPosition() override;
 
+    std::optional<size_t> getTotalSizeToRead() const override;
+
 private:
     std::unique_ptr<ReadBufferFromHDFSImpl> impl;
 };

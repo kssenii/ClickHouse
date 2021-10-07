@@ -48,10 +48,14 @@ public:
     bool nextImpl() override;
 
     off_t seek(off_t off, int whence) override;
+
     off_t getPosition() override;
+
+    std::optional<size_t> getTotalSizeToRead() const override;
 
 private:
     std::unique_ptr<ReadBuffer> initialize();
+    mutable std::optional<size_t> file_size;
 };
 
 }

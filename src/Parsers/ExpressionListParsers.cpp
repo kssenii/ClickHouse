@@ -195,7 +195,8 @@ enum class SubqueryFunctionType
 {
     NONE,
     ANY,
-    ALL
+    ALL,
+    EXISTS
 };
 
 static bool modifyAST(ASTPtr ast, SubqueryFunctionType type)
@@ -205,6 +206,7 @@ static bool modifyAST(ASTPtr ast, SubqueryFunctionType type)
      * != ALL --> NOT IN
      *  = ALL --> IN (SELECT singleValueOrNull(*) FROM subquery)
      * != ANY --> NOT IN (SELECT singleValueOrNull(*) FROM subquery)
+     * Exists(subquery) --> count(subquery) > 0
     **/
 
     auto * function = assert_cast<ASTFunction *>(ast.get());
@@ -212,6 +214,7 @@ static bool modifyAST(ASTPtr ast, SubqueryFunctionType type)
 
     auto function_equals = operator_name == "equals";
     auto function_not_equals = operator_name == "notEquals";
+    std::cerr << "\n\n\n\nFunction: " << operator_name << std::endl;
 
     String aggregate_function_name;
     if (function_equals || function_not_equals)
@@ -321,7 +324,9 @@ bool ParserLeftAssociativeBinaryOperatorList::parseImpl(Pos & pos, ASTPtr & node
 
             ASTPtr elem;
             SubqueryFunctionType subquery_function_type = SubqueryFunctionType::NONE;
-            if (allow_any_all_operators && ParserKeyword("ANY").ignore(pos, expected))
+            if (ParserKeyword("EXISTS").ignore(pos, expected))
+                subquery_function_type = SubqueryFunctionType::EXISTS;
+            else if (allow_any_all_operators && ParserKeyword("ANY").ignore(pos, expected))
                 subquery_function_type = SubqueryFunctionType::ANY;
             else if (allow_any_all_operators && ParserKeyword("ALL").ignore(pos, expected))
                 subquery_function_type = SubqueryFunctionType::ALL;
@@ -376,8 +381,10 @@ bool ParserVariableArityOperatorList::parseImpl(Pos & pos, ASTPtr & node, Expect
         if (!parseOperator(pos, infix, expected))
             break;
 
+        std::cerr << "\n\n\n\n\n\nFunction name: " << function_name << std::endl;
         if (!arguments)
         {
+            std::cerr << "\n\n\n\n\n\nFunction name: " << function_name << std::endl;
             node = makeASTFunction(function_name, node);
             arguments = node->as<ASTFunction &>().arguments;
         }
@@ -642,6 +649,7 @@ bool ParserPrefixUnaryOperatorExpression::parseImpl(Pos & pos, ASTPtr & node, Ex
             auto exp_list = std::make_shared<ASTExpressionList>();
 
             function->name = it[1];
+            std::cerr << "\n\n\n\n\n\n\nFucntion name: " << function->name << std::endl;
             function->arguments = exp_list;
             function->children.push_back(exp_list);
 

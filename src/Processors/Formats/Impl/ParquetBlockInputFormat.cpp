@@ -34,6 +34,7 @@ namespace ErrorCodes
 ParquetBlockInputFormat::ParquetBlockInputFormat(ReadBuffer & in_, Block header_, const FormatSettings & format_settings_)
     : IInputFormat(std::move(header_), in_), format_settings(format_settings_)
 {
+    std::cerr << "\n\n\n\n\n\nparquet block input format: " << typeid(in_).name();
 }
 
 Chunk ParquetBlockInputFormat::generate()

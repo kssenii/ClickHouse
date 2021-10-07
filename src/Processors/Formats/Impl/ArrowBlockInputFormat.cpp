@@ -25,10 +25,12 @@ namespace ErrorCodes
 ArrowBlockInputFormat::ArrowBlockInputFormat(ReadBuffer & in_, const Block & header_, bool stream_, const FormatSettings & format_settings_)
     : IInputFormat(header_, in_), stream{stream_}, format_settings(format_settings_)
 {
+    std::cerr << "\n\narrow block input format\n\n";
 }
 
 Chunk ArrowBlockInputFormat::generate()
 {
+    std::cerr << "\n\narrow block input format generate\n\n";
     Chunk res;
     arrow::Result<std::shared_ptr<arrow::RecordBatch>> batch_result;
 
@@ -70,6 +72,7 @@ Chunk ArrowBlockInputFormat::generate()
 
 void ArrowBlockInputFormat::resetParser()
 {
+    std::cerr << "\n\narrow block input format reset parser\n\n";
     IInputFormat::resetParser();
 
     if (stream)
@@ -81,6 +84,7 @@ void ArrowBlockInputFormat::resetParser()
 
 void ArrowBlockInputFormat::prepareReader()
 {
+    std::cerr << "\n\narrow block input format prepare readern\n";
     std::shared_ptr<arrow::Schema> schema;
 
     if (stream)
