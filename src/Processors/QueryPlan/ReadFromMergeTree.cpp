@@ -214,10 +214,12 @@ Pipe ReadFromMergeTree::read(
     RangesInDataParts parts_with_range, Names required_columns, ReadType read_type,
     size_t max_streams, size_t min_marks_for_concurrent_read, bool use_uncompressed_cache)
 {
-    if (read_type == ReadType::Default && max_streams > 1)
+    std::cerr << "\n\n\n\n\n\n\n\n\nReadFromMergeTree 1\n\n\n";
+    if (max_streams > 1)
         return readFromPool(parts_with_range, required_columns, max_streams,
                             min_marks_for_concurrent_read, use_uncompressed_cache);
 
+    std::cerr << "\n\n\n\n\n\n\n\n\nReadFromMergeTree 2\n\n\n";
     auto pipe = readInOrder(parts_with_range, required_columns, read_type, use_uncompressed_cache, 0);
 
     /// Use ConcatProcessor to concat sources together.

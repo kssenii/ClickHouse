@@ -167,11 +167,7 @@ std::unique_ptr<ReadBufferFromFileBase> DiskWebServer::readFile(const String & p
     meta.remote_fs_objects.emplace_back(std::make_pair(remote_path, iter->second.size));
 
     bool threadpool_read = read_settings.remote_fs_method == RemoteFSReadMethod::read_threadpool;
-
-    auto web_impl = std::make_unique<ReadBufferFromWebServerGather>(url, meta, getContext(),
-        read_settings.remote_fs_buffer_size,
-        read_settings.remote_fs_backoff_threshold, read_settings.remote_fs_backoff_max_tries,
-        threadpool_read);
+    auto web_impl = std::make_unique<ReadBufferFromWebServerGather>(url, meta, getContext(), read_settings, threadpool_read);
 
     if (threadpool_read)
     {
@@ -184,11 +180,6 @@ std::unique_ptr<ReadBufferFromFileBase> DiskWebServer::readFile(const String & p
         auto buf = std::make_unique<ReadIndirectBufferFromRemoteFS>(std::move(web_impl));
         return std::make_unique<SeekAvoidingReadBuffer>(std::move(buf), min_bytes_for_seek);
     }
-    auto reader = std::make_unique<ReadBufferFromWebServer>(url, meta, getContext(), read_settings.remote_fs_buffer_size,
-                                                            read_settings);
-
-    return std::make_unique<SeekAvoidingReadBuffer>(std::move(reader), min_bytes_for_seek);
->>>>>>> origin/retriable-http
 }
 
 

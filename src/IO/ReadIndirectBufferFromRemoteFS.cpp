@@ -1,7 +1,18 @@
 #include "ReadIndirectBufferFromRemoteFS.h"
 
+#include <Common/Stopwatch.h>
 #include <Disks/ReadBufferFromRemoteFSGather.h>
 
+
+namespace ProfileEvents
+{
+    extern const Event AsynchronousReadWaitMicroseconds;
+    extern const Event RemoteFSSeeks;
+    extern const Event RemoteFSSimpleBufferReads;
+    extern const Event RemoteFSReadMicroseconds;
+    extern const Event RemoteFSReadBytes;
+    extern const Event RemoteFSSimpleBuffers;
+}
 
 namespace DB
 {
@@ -15,6 +26,7 @@ namespace ErrorCodes
 ReadIndirectBufferFromRemoteFS::ReadIndirectBufferFromRemoteFS(
     std::shared_ptr<ReadBufferFromRemoteFSGather> impl_) : impl(std::move(impl_))
 {
+    ProfileEvents::increment(ProfileEvents::RemoteFSSimpleBuffers);
 }
 
 
@@ -32,6 +44,7 @@ String ReadIndirectBufferFromRemoteFS::getFileName() const
 
 off_t ReadIndirectBufferFromRemoteFS::seek(off_t offset_, int whence)
 {
+    ProfileEvents::increment(ProfileEvents::RemoteFSSeeks);
     if (whence == SEEK_CUR)
     {
         /// If position within current working buffer - shift pos.
@@ -72,12 +85,20 @@ off_t ReadIndirectBufferFromRemoteFS::seek(off_t offset_, int whence)
 
 bool ReadIndirectBufferFromRemoteFS::nextImpl()
 {
+    ProfileEvents::increment(ProfileEvents::RemoteFSSimpleBufferReads);
+    Stopwatch watch(CLOCK_MONOTONIC);
+
     /// Transfer current position and working_buffer to actual ReadBuffer
     swap(*impl);
     /// Position and working_buffer will be updated in next() call
     auto result = impl->next();
     /// and assigned to current buffer.
     swap(*impl);
+
+    watch.stop();
+    size_t bytes_read = working_buffer.size();
+    ProfileEvents::increment(ProfileEvents::RemoteFSReadMicroseconds, watch.elapsedMicroseconds());
+    ProfileEvents::increment(ProfileEvents::RemoteFSReadBytes, bytes_read);
 
     return result;
 }

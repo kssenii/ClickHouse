@@ -17,6 +17,12 @@
 
 namespace fs = std::filesystem;
 
+namespace ProfileEvents
+{
+    extern const Event RemoteFSNewReaders;
+    extern const Event RemoteFSSeekReset;
+}
+
 namespace DB
 {
 
@@ -36,7 +42,7 @@ SeekableReadBufferPtr ReadBufferFromS3Gather::createImplementationBuffer(const S
 
 SeekableReadBufferPtr ReadBufferFromWebServerGather::createImplementationBuffer(const String & path) const
 {
-    return std::make_unique<ReadBufferFromWebServer>(fs::path(uri) / path, context, buf_size, backoff_threshold, max_tries, threadpool_read);
+    return std::make_unique<ReadBufferFromWebServer>(fs::path(uri) / path, context, settings, threadpool_read);
 }
 
 
@@ -77,6 +83,7 @@ SeekableReadBufferPtr ReadBufferFromRemoteFSGather::initialize()
 
         if (size > current_buf_offset)
         {
+            ProfileEvents::increment(ProfileEvents::RemoteFSNewReaders);
             auto buf = createImplementationBuffer(file_path);
             buf->seek(current_buf_offset, SEEK_SET);
             return buf;
@@ -131,7 +138,11 @@ bool ReadBufferFromRemoteFSGather::readImpl()
 
 void ReadBufferFromRemoteFSGather::reset()
 {
-    current_buf.reset();
+    if (current_buf)
+    {
+        ProfileEvents::increment(ProfileEvents::RemoteFSSeekReset);
+        current_buf.reset();
+    }
 }
 
 }

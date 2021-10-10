@@ -9,6 +9,12 @@
 #include <Common/escapeForFileName.h>
 #include <Common/typeid_cast.h>
 
+namespace ProfileEvents
+{
+    extern const Event RemoteFSSeekToStart;
+    extern const Event RemoteFSSeekToMark;
+    extern const Event RemoteFSContinueReading;
+}
 namespace DB
 {
 
@@ -118,7 +124,7 @@ size_t MergeTreeReaderWide::readRows(size_t from_mark, bool continue_reading, si
 
                 readData(
                     column_from_part, column, from_mark, continue_reading,
-                    max_rows_to_read, cache, /* was_prefetched =*/ !prefetched_streams.empty());
+                    max_rows_to_read, cache, prefetched_streams);
 
                 /// For elements of Nested, column_size_before_reading may be greater than column size
                 ///  if offsets are not empty and were already read, but elements are empty.
@@ -236,13 +242,16 @@ void MergeTreeReaderWide::prefetch(
     {
         String stream_name = ISerialization::getFileNameForStream(name_and_type, substream_path);
 
+        // auto mark_prefetched = prefetched_marks_per_stream[stream_name].contains(from_mark);
         if (!prefetched_streams.count(stream_name))
         {
             bool seek_to_mark = !continue_reading;
-            if (ReadBuffer * buf = getStream(false, substream_path, streams, name_and_type, from_mark, seek_to_mark, cache))
+            if (ReadBuffer * buf = getStream(/* seek_to_start */false, substream_path, streams, name_and_type, from_mark, seek_to_mark, cache))
+            {
                 buf->prefetch();
-
-            prefetched_streams.insert(stream_name);
+                prefetched_marks_per_stream[stream_name].insert(from_mark);
+                prefetched_streams.insert(stream_name);
+            }
         }
     });
 }
@@ -251,7 +260,8 @@ void MergeTreeReaderWide::prefetch(
 void MergeTreeReaderWide::readData(
     const NameAndTypePair & name_and_type, ColumnPtr & column,
     size_t from_mark, bool continue_reading, size_t max_rows_to_read,
-    ISerialization::SubstreamsCache & cache, bool was_prefetched)
+    ISerialization::SubstreamsCache & cache,
+    const std::unordered_set<std::string> & prefetched_streams)
 {
     double & avg_value_size_hint = avg_value_size_hints[name_and_type.name];
     ISerialization::DeserializeBinaryBulkSettings deserialize_settings;
@@ -260,8 +270,12 @@ void MergeTreeReaderWide::readData(
     const auto & name = name_and_type.name;
     auto & serialization = serializations[name];
 
+    if (continue_reading)
+        ProfileEvents::increment(ProfileEvents::RemoteFSContinueReading);
+
     if (deserialize_binary_bulk_state_map.count(name) == 0)
     {
+        ProfileEvents::increment(ProfileEvents::RemoteFSSeekToStart);
         deserialize_settings.getter = [&](const ISerialization::SubstreamPath & substream_path)
         {
             return getStream(/* seek_to_start = */true, substream_path, streams, name_and_type, from_mark, /* seek_to_mark = */false, cache);
@@ -271,7 +285,12 @@ void MergeTreeReaderWide::readData(
 
     deserialize_settings.getter = [&](const ISerialization::SubstreamPath & substream_path)
     {
+        String stream_name = ISerialization::getFileNameForStream(name_and_type, substream_path);
+        bool was_prefetched = prefetched_streams.contains(stream_name);
         bool seek_to_mark = !was_prefetched && !continue_reading;
+
+        if (seek_to_mark)
+            ProfileEvents::increment(ProfileEvents::RemoteFSSeekToMark);
 
         return getStream(
             /* seek_to_start = */false, substream_path, streams, name_and_type, from_mark,

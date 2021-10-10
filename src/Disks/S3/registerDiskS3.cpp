@@ -219,7 +219,7 @@ void registerDiskS3(DiskFactory & factory)
             s3disk = std::make_shared<DiskCacheWrapper>(s3disk, cache_disk, cache_file_predicate);
         }
 
-        return std::make_shared<DiskRestartProxy>(s3disk);
+        return s3disk;
     };
     factory.registerDiskType("s3", creator);
 }

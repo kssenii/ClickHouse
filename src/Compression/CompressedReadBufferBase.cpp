@@ -13,6 +13,7 @@
 #include <Compression/CompressionInfo.h>
 #include <IO/WriteHelpers.h>
 #include <IO/Operators.h>
+#include <IO/AsynchronousReadIndirectBufferFromRemoteFS.h>
 
 
 namespace ProfileEvents
@@ -118,6 +119,7 @@ size_t CompressedReadBufferBase::readCompressedData(size_t & size_decompressed, 
     own_compressed_buffer.resize(header_size + sizeof(Checksum));
 
     compressed_in->readStrict(own_compressed_buffer.data(), sizeof(Checksum) + header_size);
+
     char * compressed_header = own_compressed_buffer.data() + sizeof(Checksum);
 
     uint8_t method = ICompressionCodec::readMethod(compressed_header);

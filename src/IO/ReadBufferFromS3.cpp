@@ -146,6 +146,9 @@ off_t ReadBufferFromS3::seek(off_t offset_, int whence)
     if (offset_ < 0)
         throw Exception("Seek position is out of bounds. Offset: " + std::to_string(offset_), ErrorCodes::SEEK_POSITION_OUT_OF_BOUND);
 
+    if (offset > offset_)
+        std::terminate();
+
     offset = offset_;
 
     return offset;

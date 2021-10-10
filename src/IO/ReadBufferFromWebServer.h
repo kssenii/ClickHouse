@@ -42,6 +42,7 @@ private:
     off_t offset = 0;
 
     ReadSettings read_settings;
+
     bool use_external_buffer;
 };
 

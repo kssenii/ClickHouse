@@ -46,7 +46,7 @@ private:
     void readData(
         const NameAndTypePair & name_and_type, ColumnPtr & column,
         size_t from_mark, bool continue_reading, size_t max_rows_to_read,
-        ISerialization::SubstreamsCache & cache, bool was_prefetched);
+        ISerialization::SubstreamsCache & cache, const std::unordered_set<std::string> & prefetched_streams);
 
     /// Make next readData more simple by calling 'prefetch' of all related ReadBuffers (column streams).
     void prefetch(
@@ -55,6 +55,8 @@ private:
         bool continue_reading,
         ISerialization::SubstreamsCache & cache,
         std::unordered_set<std::string> & prefetched_streams); /// if stream was already prefetched do nothing
+
+    std::map<String, std::unordered_set<size_t>> prefetched_marks_per_stream;
 };
 
 }

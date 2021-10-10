@@ -251,6 +251,23 @@
     \
     M(RemoteFSReadMicroseconds, "Time of reading from remote filesystem.") \
     M(RemoteFSReadBytes, "Read bytes from remote filesystem.") \
+    M(RemoteFSSeeks, "Number of seeks made while reading from remote filesystem.") \
+    M(RemoteFSPrefetches, "Number of prefetches made while reading from remote filesystem.") \
+    M(RemoteFSAsyncBufferReads, "Number of single buffer reads made while reading from remote filesystem.") \
+    M(RemoteFSSimpleBufferReads, "Number of single buffer reads made while reading from remote filesystem.") \
+    M(RemoteFSSeekCancelledPrefetches, "Number of cancelled prefetches while reading from remote filesystem.") \
+    M(RemoteFSDesCancelledPrefetches, "Number of cancelled prefetches while reading from remote filesystem.") \
+    M(RemoteFSNewReaders, "") \
+    M(RemoteFSAsyncBuffers, "") \
+    M(RemoteFSSimpleBuffers, "") \
+    M(RemoteFSSeekToStart, "") \
+    M(RemoteFSSeekToMark, "") \
+    M(RemoteFSContinueReading, "") \
+    M(RemoteFSPrefetchRead, "") \
+    M(RemoteFSSeek1, "") \
+    M(RemoteFSSeek2, "") \
+    M(RemoteFSSeek3, "") \
+    M(RemoteFSSeekReset, "") \
     \
     M(SleepFunctionCalls, "Number of times a sleep function (sleep, sleepEachRow) has been called.") \
     M(SleepFunctionMicroseconds, "Time spent sleeping due to a sleep function call.") \

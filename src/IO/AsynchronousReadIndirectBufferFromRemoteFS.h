@@ -46,6 +46,10 @@ public:
 
     void prefetch() override;
 
+    void setPrefetchSize(size_t size) { need_to_read = size; }
+
+    String & getEvents() { return events; }
+
 private:
     bool nextImpl() override;
 
@@ -64,6 +68,14 @@ private:
     size_t absolute_position = 0;
 
     Memory<> prefetch_buffer;
+
+    size_t prefetch_count = 0;
+
+    size_t reads = 0;
+
+    size_t need_to_read = 0;
+    bool read_unprefetched = false;
+    String events;
 };
 
 }

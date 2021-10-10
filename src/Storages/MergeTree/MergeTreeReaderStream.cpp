@@ -32,10 +32,13 @@ MergeTreeReaderStream::MergeTreeReaderStream(
     size_t max_mark_range_bytes = 0;
     size_t sum_mark_range_bytes = 0;
 
+    std::cerr << "\n\n\n\n\n\nHaving ranges: " << all_mark_ranges.size() << std::endl;
     for (const auto & mark_range : all_mark_ranges)
     {
         size_t left_mark = mark_range.begin;
         size_t right_mark = mark_range.end;
+
+        std::cerr << left_mark << "-" << right_mark << std::endl;
 
         /// NOTE: if we are reading the whole file, then right_mark == marks_count
         /// and we will use max_read_buffer_size for buffer size, thus avoiding the need to load marks.
@@ -64,10 +67,12 @@ MergeTreeReaderStream::MergeTreeReaderStream(
         else
         {
             mark_range_bytes = marks_loader.getMark(right_mark).offset_in_compressed_file - marks_loader.getMark(left_mark).offset_in_compressed_file;
+            std::cerr << "RIGHT MARK: " << right_mark << " : " << marks_loader.getMark(right_mark).offset_in_compressed_file << std::endl;
         }
 
         max_mark_range_bytes = std::max(max_mark_range_bytes, mark_range_bytes);
         sum_mark_range_bytes += mark_range_bytes;
+        std::cerr << "mark range bytes: " << mark_range_bytes << std::endl;
     }
 
     /// Avoid empty buffer. May happen while reading dictionary for DataTypeLowCardinality.
@@ -101,6 +106,7 @@ MergeTreeReaderStream::MergeTreeReaderStream(
     }
     else
     {
+        std::cerr << "\n\n\n\nsum mark range bytes: " << sum_mark_range_bytes << std::endl;
         auto buffer = std::make_unique<CompressedReadBufferFromFile>(
             disk->readFile(
                 path_prefix + data_file_extension,

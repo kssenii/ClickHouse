@@ -5,6 +5,7 @@
 #include <Compression/LZ4_decompress_faster.h>
 #include <IO/WriteHelpers.h>
 #include <IO/createReadBufferFromFileBase.h>
+#include <IO/AsynchronousReadIndirectBufferFromRemoteFS.h>
 
 
 namespace DB
@@ -108,7 +109,9 @@ size_t CompressedReadBufferFromFile::readBig(char * to, size_t n)
 
     /// If there are unread bytes in the buffer, then we copy needed to `to`.
     if (pos < working_buffer.end())
+    {
         bytes_read += read(to, std::min(static_cast<size_t>(working_buffer.end() - pos), n));
+    }
 
     /// If you need to read more - we will, if possible, decompress at once to `to`.
     while (bytes_read < n)

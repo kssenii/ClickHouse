@@ -40,6 +40,7 @@ MergeTreeReadPool::MergeTreeReadPool(
     , prewhere_info{prewhere_info_}
     , parts_ranges{std::move(parts_)}
 {
+    do_not_steal_tasks = true;
     /// parts don't contain duplicate MergeTreeDataPart's.
     const auto per_part_sum_marks = fillPerPartInfo(parts_ranges, check_columns_);
     fillPerThreadInfo(threads_, sum_marks_, per_part_sum_marks, parts_ranges, min_marks_for_concurrent_read_);
@@ -292,6 +293,7 @@ void MergeTreeReadPool::fillPerThreadInfo(
     for (size_t i = 0; i < threads && !parts_queue.empty(); ++i)
     {
         auto need_marks = min_marks_per_thread;
+        std::cerr << fmt::format("\n\n\n\n\n\n\n\n\n=======================================\n\n\n\n\n\n\n\n\nNeed marks {} for thread {} (all marks: {}, all_threads: {})", need_marks, i, sum_marks, threads);
 
         while (need_marks > 0 && !parts_queue.empty())
         {
@@ -346,6 +348,8 @@ void MergeTreeReadPool::fillPerThreadInfo(
                 }
             }
 
+            for (const auto & range : ranges_to_get_from_part)
+                std::cerr << fmt::format("\n\n\n\nThread: {}, range: {}-{}", i, range.begin, range.end);
             threads_tasks[i].parts_and_ranges.push_back({ part_idx, ranges_to_get_from_part });
             threads_tasks[i].sum_marks_in_parts.push_back(marks_in_ranges);
             if (marks_in_ranges != 0)
