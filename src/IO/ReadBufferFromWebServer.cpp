@@ -24,15 +24,16 @@ static const auto WAIT_MS = 10;
 
 
 ReadBufferFromWebServer::ReadBufferFromWebServer(
-    const String & url_, ContextPtr context_, size_t buf_size_,
-    size_t backoff_threshold_, size_t max_tries_, bool use_external_buffer_)
+        const String & url_,
+        ContextPtr context_,
+        const ReadSettings & settings_,
+        bool use_external_buffer_)
     : SeekableReadBuffer(nullptr, 0)
     , log(&Poco::Logger::get("ReadBufferFromWebServer"))
     , context(context_)
     , url(url_)
-    , buf_size(buf_size_)
-    , backoff_threshold_ms(backoff_threshold_)
-    , max_tries(max_tries_)
+    , buf_size(settings_.remote_fs_buffer_size)
+    , settings(settings_)
     , use_external_buffer(use_external_buffer_)
 {
 }
@@ -43,7 +44,7 @@ std::unique_ptr<ReadBuffer> ReadBufferFromWebServer::initialize()
     Poco::URI uri(url);
 
     ReadWriteBufferFromHTTP::HTTPHeaderEntries headers;
-    headers.emplace_back(std::make_pair("Range", fmt::format("bytes={}-", offset)));
+    headers.emplace_back(std::make_pair("Range", fmt::format("bytes={}-{}", offset, offset + buf_size)));
     const auto & settings = context->getSettingsRef();
     LOG_DEBUG(log, "Reading from offset: {}", offset);
     const auto & config = context->getConfigRef();
@@ -60,7 +61,11 @@ std::unique_ptr<ReadBuffer> ReadBufferFromWebServer::initialize()
                            http_keep_alive_timeout),
         0,
         Poco::Net::HTTPBasicCredentials{},
-        buf_size, headers, context->getRemoteHostFilter(), use_external_buffer);
+        buf_size,
+        settings,
+        headers,
+        context->getRemoteHostFilter(),
+        use_external_buffer);
 }
 
 

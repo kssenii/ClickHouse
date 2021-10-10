@@ -184,6 +184,11 @@ std::unique_ptr<ReadBufferFromFileBase> DiskWebServer::readFile(const String & p
         auto buf = std::make_unique<ReadIndirectBufferFromRemoteFS>(std::move(web_impl));
         return std::make_unique<SeekAvoidingReadBuffer>(std::move(buf), min_bytes_for_seek);
     }
+    auto reader = std::make_unique<ReadBufferFromWebServer>(url, meta, getContext(), read_settings.remote_fs_buffer_size,
+                                                            read_settings);
+
+    return std::make_unique<SeekAvoidingReadBuffer>(std::move(reader), min_bytes_for_seek);
+>>>>>>> origin/retriable-http
 }
 
 
