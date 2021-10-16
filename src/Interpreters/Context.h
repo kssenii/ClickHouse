@@ -291,6 +291,8 @@ private:
 
     /// A flag, used to distinguish between user query and internal query to a database engine (MaterializedPostgreSQL).
     bool is_internal_query = false;
+    /// Has initializeBackgroundExecutors() method been executed?
+    bool is_background_executors_initialized = false;
 
 
 public:
@@ -853,6 +855,7 @@ public:
 
     /// Background executors related methods
     void initializeBackgroundExecutors();
+    bool isBackgroundExecutorsInitialized() const;
 
     MergeMutateBackgroundExecutorPtr getMergeMutateExecutor() const;
     OrdinaryBackgroundExecutorPtr getMovesExecutor() const;

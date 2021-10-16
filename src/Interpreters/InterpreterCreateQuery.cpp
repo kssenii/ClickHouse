@@ -830,6 +830,13 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
         throw Exception("Temporary tables cannot be inside a database. You should not specify a database for a temporary table.",
             ErrorCodes::BAD_DATABASE_FOR_TEMPORARY_TABLE);
 
+    if (getContext()->getApplicationType() == Context::ApplicationType::LOCAL
+        && !getContext()->isBackgroundExecutorsInitialized()
+        && create.storage && endsWith(create.storage->engine->name, "MergeTree"))
+    {
+        getContext()->initializeBackgroundExecutors();
+    }
+
     String current_database = getContext()->getCurrentDatabase();
     auto database_name = create.database.empty() ? current_database : create.database;
 
