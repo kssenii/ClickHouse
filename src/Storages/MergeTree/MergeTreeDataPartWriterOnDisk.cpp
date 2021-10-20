@@ -250,7 +250,7 @@ void MergeTreeDataPartWriterOnDisk::calculateAndSerializeSkipIndices(const Block
 void MergeTreeDataPartWriterOnDisk::finishPrimaryIndexSerialization(
         MergeTreeData::DataPart::Checksums & checksums, bool sync)
 {
-    bool write_final_mark = (with_final_mark && data_written);
+    bool write_final_mark = data_written;
     if (write_final_mark && compute_granularity)
         index_granularity.appendMark(0);
 

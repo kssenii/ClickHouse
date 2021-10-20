@@ -522,7 +522,7 @@ void MergeTreeDataPartWriterWide::finishDataSerialization(IMergeTreeDataPart::Ch
         adjustLastMarkIfNeedAndFlushToDisk(rows_written_in_last_mark);
     }
 
-    bool write_final_mark = (with_final_mark && data_written);
+    bool write_final_mark = data_written;
 
     {
         auto it = columns_list.begin();
