@@ -45,7 +45,6 @@ protected:
     const NamesAndTypesList columns_list;
     const MergeTreeWriterSettings settings;
     MergeTreeIndexGranularity index_granularity;
-    const bool with_final_mark;
 
     MutableColumns index_columns;
 };

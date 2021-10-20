@@ -236,7 +236,7 @@ void MergeTreeDataPartWriterCompact::finishDataSerialization(IMergeTreeDataPart:
         assert(stream->hashing_buf.offset() == 0);
 #endif
 
-    if (with_final_mark && data_written)
+    if (data_written)
     {
         for (size_t i = 0; i < columns_list.size(); ++i)
         {
