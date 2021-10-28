@@ -9,6 +9,7 @@
 #include <IO/ReadBufferFromIStream.h>
 #include <IO/ReadHelpers.h>
 #include <IO/ReadSettings.h>
+#include <IO/SeekableReadBuffer.h>
 #include <Poco/Any.h>
 #include <Poco/Net/HTTPBasicCredentials.h>
 #include <Poco/Net/HTTPClientSession.h>
@@ -34,6 +35,7 @@ namespace ErrorCodes
     extern const int TOO_MANY_REDIRECTS;
     extern const int HTTP_RANGE_NOT_SATISFIABLE;
     extern const int BAD_ARGUMENTS;
+    extern const int CANNOT_SEEK_THROUGH_FILE;
 }
 
 template <typename SessionPtr>
@@ -83,7 +85,7 @@ public:
 namespace detail
 {
     template <typename UpdatableSessionPtr>
-    class ReadWriteBufferFromHTTPBase : public ReadBuffer
+    class ReadWriteBufferFromHTTPBase : public SeekableReadBuffer
     {
     public:
         using HTTPHeaderEntry = std::tuple<std::string, std::string>;
@@ -114,7 +116,7 @@ namespace detail
         size_t buffer_size;
         bool use_external_buffer;
 
-        size_t bytes_read = 0;
+        size_t offset_from_begin_pos = 0;
         Range read_range;
 
         /// Delayed exception in case retries with partial content are not satisfiable.
@@ -124,13 +126,13 @@ namespace detail
         ReadSettings settings;
         Poco::Logger * log;
 
-        std::istream * call(Poco::URI uri_, Poco::Net::HTTPResponse & response)
+        std::istream * call(Poco::URI uri_, Poco::Net::HTTPResponse & response, const std::string & method_)
         {
             // With empty path poco will send "POST  HTTP/1.1" its bug.
             if (uri_.getPath().empty())
                 uri_.setPath("/");
 
-            Poco::Net::HTTPRequest request(method, uri_.getPathAndQuery(), Poco::Net::HTTPRequest::HTTP_1_1);
+            Poco::Net::HTTPRequest request(method_, uri_.getPathAndQuery(), Poco::Net::HTTPRequest::HTTP_1_1);
             request.setHost(uri_.getHost()); // use original, not resolved host name in header
 
             if (out_stream_callback)
@@ -149,9 +151,9 @@ namespace detail
             if (with_partial_content)
             {
                 if (read_range.end)
-                    request.set("Range", fmt::format("bytes={}-{}", read_range.begin + bytes_read, *read_range.end));
+                    request.set("Range", fmt::format("bytes={}-{}", read_range.begin + offset_from_begin_pos, *read_range.end));
                 else
-                    request.set("Range", fmt::format("bytes={}-", read_range.begin + bytes_read));
+                    request.set("Range", fmt::format("bytes={}-", read_range.begin + offset_from_begin_pos));
             }
 
             if (!credentials.getUsername().empty())
@@ -191,6 +193,36 @@ namespace detail
             }
         }
 
+
+        off_t getOffset() const
+        {
+            return read_range.begin + offset_from_begin_pos;
+        }
+
+        std::optional<size_t> getTotalSizeToRead()
+        {
+            if (read_range.end)
+                return *read_range.end - read_range.begin;
+
+            Poco::Net::HTTPResponse response;
+            call(uri, response, Poco::Net::HTTPRequest::HTTP_HEAD);
+
+            while (isRedirect(response.getStatus()))
+            {
+                Poco::URI uri_redirect(response.get("Location"));
+                remote_host_filter.checkURL(uri_redirect);
+
+                session->updateSession(uri_redirect);
+
+                istr = call(uri_redirect, response, method);
+            }
+
+            if (response.hasContentLength())
+                read_range.end = read_range.begin + response.getContentLength();
+
+            return read_range.end;
+        }
+
     public:
         using NextCallback = std::function<void(size_t)>;
         using OutStreamCallback = std::function<void(std::ostream &)>;
@@ -208,7 +240,7 @@ namespace detail
             const RemoteHostFilter & remote_host_filter_ = {},
             bool delay_initialization = false,
             bool use_external_buffer_ = false)
-            : ReadBuffer(nullptr, 0)
+            : SeekableReadBuffer(nullptr, 0)
             , uri {uri_}
             , method {!method_.empty() ? method_ : out_stream_callback_ ? Poco::Net::HTTPRequest::HTTP_POST : Poco::Net::HTTPRequest::HTTP_GET}
             , session {session_}
@@ -232,12 +264,14 @@ namespace detail
 
             if (!delay_initialization)
                 initialize();
+
+            offset = start_byte;
         }
 
         void initialize()
         {
             Poco::Net::HTTPResponse response;
-            istr = call(uri, response);
+            istr = call(uri, response, method);
 
             while (isRedirect(response.getStatus()))
             {
@@ -246,10 +280,10 @@ namespace detail
 
                 session->updateSession(uri_redirect);
 
-                istr = call(uri_redirect, response);
+                istr = call(uri_redirect, response, method);
             }
 
-            if (!bytes_read && !read_range.end && response.hasContentLength())
+            if (!offset_from_begin_pos && !read_range.end && response.hasContentLength())
                 read_range.end = response.getContentLength();
 
             try
@@ -276,12 +310,52 @@ namespace detail
             }
         }
 
+        off_t getPosition() override
+        {
+            return offset - available();
+        }
+
+        off_t seek(off_t new_offset, int whence) override
+        {
+            size_t new_pos;
+            if (whence == SEEK_SET)
+            {
+                new_pos = new_offset;
+            }
+            else if (whence == SEEK_CUR)
+            {
+                new_pos = offset - (working_buffer.end() - pos) + new_offset;
+            }
+            else
+            {
+                throw Exception("Only SEEK_SET or SEEK_CUR modes are allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+            }
+
+            /// Position is unchanged.
+            if (new_pos + (working_buffer.end() - pos) == offset)
+                return new_pos;
+
+            if (file_offset_of_buffer_end - working_buffer.size() <= static_cast<size_t>(new_pos)
+                && new_pos <= file_offset_of_buffer_end)
+            {
+                pos = working_buffer.end() - offset + new_pos;
+                assert(pos >= working_buffer.begin());
+                assert(pos <= working_buffer.end());
+
+                return new_pos;
+            }
+
+            initialize();
+            offset = new_offset;
+            return offset;
+        }
+
         bool nextImpl() override
         {
             if (next_callback)
                 next_callback(count());
 
-            if (read_range.end && bytes_read == read_range.end.value())
+            if (read_range.end && offset_from_begin_pos == read_range.end.value())
                 return false;
 
             if (impl)
@@ -340,15 +414,15 @@ namespace detail
                 {
                     /**
                      * Retry request unconditionally if nothing has beed read yet.
-                     * Otherwise if it is GET method retry with range header starting from bytes_read.
+                     * Otherwise if it is GET method retry with range header starting from offset_from_begin_pos.
                      */
-                    bool can_retry_request = !bytes_read || method == Poco::Net::HTTPRequest::HTTP_GET;
+                    bool can_retry_request = !offset_from_begin_pos || method == Poco::Net::HTTPRequest::HTTP_GET;
                     if (!can_retry_request)
                         throw;
 
                     /**
                      * if total_size is not known, last read can fail if we retry with
-                     * bytes_read == total_size and header `bytes=bytes_read-`
+                     * (offset = begin_pos + offset_from_begin_pos) == total_size and header `bytes=offset-`
                      * (we will get an error code 416 - range not satisfiable).
                      * In this case rethrow previous exception.
                      */
@@ -358,7 +432,7 @@ namespace detail
                     LOG_ERROR(log,
                               "HTTP request to `{}` failed at try {}/{} with bytes read: {}. "
                               "Error: {}, code: {}. (Current backoff wait is {}/{} ms)",
-                              uri.toString(), i, settings.http_max_tries, bytes_read, e.what(), e.code(),
+                              uri.toString(), i, settings.http_max_tries, offset_from_begin_pos, e.what(), e.code(),
                               milliseconds_to_wait, settings.http_retry_max_backoff_ms);
 
                     retry_with_range_header = true;
@@ -380,6 +454,7 @@ namespace detail
 
             internal_buffer = impl->buffer();
             working_buffer = internal_buffer;
+            offset_from_begin_pos += working_buffer.size();
             return true;
         }
 

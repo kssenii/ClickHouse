@@ -43,6 +43,8 @@ Chunk ORCBlockInputFormat::generate()
         return res;
 
     std::shared_ptr<arrow::RecordBatch> batch_result;
+    std::cerr << fmt::format("\n\nReading from generate: {}, {}", stripe_current, include_indices.size()) << std::endl;
+    // std::cerr << "\n\n\n\nInlcude indices: " << include_indices << "\n";
     arrow::Status batch_status = file_reader->ReadStripe(stripe_current, include_indices, &batch_result);
     if (!batch_status.ok())
         throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
@@ -56,9 +58,33 @@ Chunk ORCBlockInputFormat::generate()
     ++stripe_current;
 
     arrow_column_to_ch_column->arrowTableToCHChunk(res, *table_result);
+    std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
     return res;
 }
-
+// Chunk ORCBlockInputFormat::generate()
+// {
+//     Chunk res;
+//
+//     if (!file_reader)
+//         prepareReader();
+//
+//     if (stripe_current >= stripe_total)
+//         return res;
+//
+//     std::shared_ptr<arrow::Table> table;
+//     std::cerr << fmt::format("\n\nReading from generate: {}, {}", stripe_current, include_indices.size()) << std::endl;
+//     // std::cerr << "\n\n\n\nInlcude indices: " << include_indices << "\n";
+//     arrow::Status read_status = file_reader->Read(include_indices, &table);
+//     if (!read_status.ok())
+//         throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
+//                                "Error while reading batch of ORC data: {}", read_status.ToString());
+//
+//     ++stripe_current;
+//
+//     arrow_column_to_ch_column->arrowTableToCHChunk(res, table);
+//     std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
+//     return res;
+// }
 void ORCBlockInputFormat::resetParser()
 {
     IInputFormat::resetParser();
