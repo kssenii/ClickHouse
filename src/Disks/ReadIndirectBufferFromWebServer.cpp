@@ -20,6 +20,8 @@ namespace ErrorCodes
     extern const int NETWORK_ERROR;
 }
 
+static constexpr size_t HTTP_MAX_TRIES = 10;
+
 ReadIndirectBufferFromWebServer::ReadIndirectBufferFromWebServer(
     const String & url_, ContextPtr context_, size_t buf_size_, const ReadSettings & settings_)
     : BufferWithOwnMemory<SeekableReadBuffer>(buf_size_)
@@ -60,6 +62,37 @@ std::unique_ptr<ReadBuffer> ReadIndirectBufferFromWebServer::initialize()
 }
 
 
+void ReadIndirectBufferFromWebServer::initializeWithRetry()
+{
+    /// Initialize impl with retry.
+    auto num_tries = std::max(read_settings.http_max_tries, HTTP_MAX_TRIES);
+    size_t milliseconds_to_wait = read_settings.http_retry_initial_backoff_ms;
+    bool initialized = false;
+    for (size_t i = 0; (i < num_tries) && !initialized; ++i)
+    {
+        while (milliseconds_to_wait < read_settings.http_retry_max_backoff_ms)
+        {
+            try
+            {
+                impl = initialize();
+                initialized = true;
+                break;
+            }
+            catch (Poco::Exception & e)
+            {
+                if (i == num_tries - 1)
+                    throw;
+
+                LOG_ERROR(&Poco::Logger::get("ReadBufferFromWeb"), e.what());
+                sleepForMilliseconds(milliseconds_to_wait);
+                milliseconds_to_wait *= 2;
+            }
+        }
+        milliseconds_to_wait = read_settings.http_retry_initial_backoff_ms;
+    }
+}
+
+
 bool ReadIndirectBufferFromWebServer::nextImpl()
 {
     if (impl)
@@ -70,7 +103,7 @@ bool ReadIndirectBufferFromWebServer::nextImpl()
     }
     else
     {
-        impl = initialize();
+        initializeWithRetry();
     }
 
     auto result = impl->next();

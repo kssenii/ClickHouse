@@ -23,7 +23,7 @@ namespace DB
 /**
  * Perform S3 HTTP GET request and provide response to read.
  */
-class ReadBufferFromS3 : public SeekableReadBuffer
+class ReadBufferFromS3 : public SeekableReadBufferWithSize
 {
 private:
     std::shared_ptr<Aws::S3::S3Client> client_ptr;
@@ -50,8 +50,11 @@ public:
     off_t seek(off_t off, int whence) override;
     off_t getPosition() override;
 
+    std::optional<size_t> getTotalSize() override;
+
 private:
     std::unique_ptr<ReadBuffer> initialize();
+    std::optional<size_t> file_size;
 };
 
 }

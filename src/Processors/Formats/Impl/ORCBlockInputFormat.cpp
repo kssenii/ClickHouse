@@ -43,6 +43,8 @@ Chunk ORCBlockInputFormat::generate()
         return res;
 
     std::shared_ptr<arrow::RecordBatch> batch_result;
+    std::cerr << fmt::format("\n\nReading from generate: {}, {}", stripe_current, include_indices.size()) << std::endl;
+    // std::cerr << "\n\n\n\nInlcude indices: " << include_indices << "\n";
     arrow::Status batch_status = file_reader->ReadStripe(stripe_current, include_indices, &batch_result);
     if (!batch_status.ok())
         throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
@@ -56,6 +58,7 @@ Chunk ORCBlockInputFormat::generate()
     ++stripe_current;
 
     arrow_column_to_ch_column->arrowTableToCHChunk(res, *table_result);
+    std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
     return res;
 }
 

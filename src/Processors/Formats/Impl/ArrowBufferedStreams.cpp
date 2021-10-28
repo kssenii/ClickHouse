@@ -6,6 +6,7 @@
 
 #if USE_ARROW || USE_ORC || USE_PARQUET
 
+#include <Common/assert_cast.h>
 #include <IO/ReadBufferFromFileDescriptor.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/copyData.h>
@@ -46,9 +47,19 @@ RandomAccessFileFromSeekableReadBuffer::RandomAccessFileFromSeekableReadBuffer(S
 {
 }
 
+RandomAccessFileFromSeekableReadBuffer::RandomAccessFileFromSeekableReadBuffer(SeekableReadBufferWithSize & in_)
+    : in{in_}, is_open{true}
+{
+}
+
 arrow::Result<int64_t> RandomAccessFileFromSeekableReadBuffer::GetSize()
 {
-    return arrow::Result<int64_t>(file_size);
+    if (!file_size)
+    {
+        auto * buf_with_size = assert_cast<SeekableReadBufferWithSize *>(&in);
+        file_size = buf_with_size->getTotalSize();
+    }
+    return arrow::Result<int64_t>(*file_size);
 }
 
 arrow::Status RandomAccessFileFromSeekableReadBuffer::Close()
@@ -131,15 +142,19 @@ std::shared_ptr<arrow::io::RandomAccessFile> asArrowFile(ReadBuffer & in)
         if (res == 0 && S_ISREG(stat.st_mode))
             return std::make_shared<RandomAccessFileFromSeekableReadBuffer>(*fd_in, stat.st_size);
     }
-
-    // fallback to loading the entire file in memory
-    std::string file_data;
+    else if (auto * seekable_in = dynamic_cast<SeekableReadBufferWithSize *>(&in))
     {
-        WriteBufferFromString file_buffer(file_data);
-        copyData(in, file_buffer);
+        return std::make_shared<RandomAccessFileFromSeekableReadBuffer>(*seekable_in);
     }
 
-    return std::make_shared<arrow::io::BufferReader>(arrow::Buffer::FromString(std::move(file_data)));
+     // fallback to loading the entire file in memory
+     std::string file_data;
+     {
+         WriteBufferFromString file_buffer(file_data);
+         copyData(in, file_buffer);
+     }
+
+     return std::make_shared<arrow::io::BufferReader>(arrow::Buffer::FromString(std::move(file_data)));
 }
 
 }

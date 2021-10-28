@@ -39,7 +39,10 @@ Chunk ArrowBlockInputFormat::generate()
 
         batch_result = stream_reader->Next();
         if (batch_result.ok() && !(*batch_result))
+        {
+            std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
             return res;
+        }
     }
     else
     {
@@ -47,7 +50,10 @@ Chunk ArrowBlockInputFormat::generate()
             prepareReader();
 
         if (record_batch_current >= record_batch_total)
+        {
+            std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
             return res;
+        }
 
         batch_result = file_reader->ReadRecordBatch(record_batch_current);
     }
@@ -65,6 +71,7 @@ Chunk ArrowBlockInputFormat::generate()
 
     arrow_column_to_ch_column->arrowTableToCHChunk(res, *table_result);
 
+    std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
     return res;
 }
 

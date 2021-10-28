@@ -6,12 +6,14 @@
 #if USE_ARROW || USE_ORC || USE_PARQUET
 
 #include <arrow/io/interfaces.h>
+#include <optional>
 
 namespace DB
 {
 
 class ReadBuffer;
 class SeekableReadBuffer;
+class SeekableReadBufferWithSize;
 class WriteBuffer;
 
 class ArrowBufferedOutputStream : public arrow::io::OutputStream
@@ -42,6 +44,8 @@ class RandomAccessFileFromSeekableReadBuffer : public arrow::io::RandomAccessFil
 public:
     RandomAccessFileFromSeekableReadBuffer(SeekableReadBuffer & in_, off_t file_size_);
 
+    RandomAccessFileFromSeekableReadBuffer(SeekableReadBufferWithSize & in_);
+
     arrow::Result<int64_t> GetSize() override;
 
     arrow::Status Close() override;
@@ -58,7 +62,7 @@ public:
 
 private:
     SeekableReadBuffer & in;
-    off_t file_size;
+    std::optional<off_t> file_size;
     bool is_open = false;
 
     ARROW_DISALLOW_COPY_AND_ASSIGN(RandomAccessFileFromSeekableReadBuffer);

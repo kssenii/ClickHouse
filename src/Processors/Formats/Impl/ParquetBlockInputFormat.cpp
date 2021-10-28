@@ -47,6 +47,7 @@ Chunk ParquetBlockInputFormat::generate()
         return res;
 
     std::shared_ptr<arrow::Table> table;
+    std::cerr << fmt::format("\n\nReading from generate: {}, {}", row_group_current, column_indices.size()) << std::endl;
     arrow::Status read_status = file_reader->ReadRowGroup(row_group_current, column_indices, &table);
     if (!read_status.ok())
         throw ParsingException{"Error while reading Parquet data: " + read_status.ToString(),
@@ -55,6 +56,9 @@ Chunk ParquetBlockInputFormat::generate()
     ++row_group_current;
 
     arrow_column_to_ch_column->arrowTableToCHChunk(res, table);
+    std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
+    if (row_group_current)
+        std::terminate();
     return res;
 }
 
@@ -95,6 +99,7 @@ void ParquetBlockInputFormat::prepareReader()
     THROW_ARROW_NOT_OK(parquet::arrow::OpenFile(asArrowFile(*in), arrow::default_memory_pool(), &file_reader));
     row_group_total = file_reader->num_row_groups();
     row_group_current = 0;
+    std::cerr << "\n\n\n\nROW GROUP TOTAL: " << row_group_total << std::endl;
 
     std::shared_ptr<arrow::Schema> schema;
     THROW_ARROW_NOT_OK(file_reader->GetSchema(&schema));

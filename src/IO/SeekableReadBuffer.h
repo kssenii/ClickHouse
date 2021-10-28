@@ -1,6 +1,7 @@
 #pragma once
 
 #include <IO/ReadBuffer.h>
+#include <optional>
 
 namespace DB
 {
@@ -31,6 +32,18 @@ public:
      * @return Offset from the begin of the underlying buffer / file corresponds to the buffer current position.
      */
     virtual off_t getPosition() = 0;
+};
+
+
+class SeekableReadBufferWithSize : public SeekableReadBuffer
+{
+public:
+    SeekableReadBufferWithSize(Position ptr, size_t size)
+        : SeekableReadBuffer(ptr, size) {}
+    SeekableReadBufferWithSize(Position ptr, size_t size, size_t offset)
+        : SeekableReadBuffer(ptr, size, offset) {}
+
+    virtual std::optional<size_t> getTotalSize() = 0;
 };
 
 }
