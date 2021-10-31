@@ -241,6 +241,7 @@
     M(S3ReadRequestsErrors, "Number of non-throttling errors in GET and HEAD requests to S3 storage.") \
     M(S3ReadRequestsThrottling, "Number of 429 and 503 errors in GET and HEAD requests to S3 storage.") \
     M(S3ReadRequestsRedirects, "Number of redirects in GET and HEAD requests to S3 storage.") \
+    M(S3SeeksWithReconnect, "Number of seeks which lead to new connection") \
     \
     M(S3WriteMicroseconds, "Time of POST, DELETE, PUT and PATCH requests to S3 storage.") \
     M(S3WriteBytes, "Write bytes (outgoing) in POST, DELETE, PUT and PATCH requests to S3 storage.") \

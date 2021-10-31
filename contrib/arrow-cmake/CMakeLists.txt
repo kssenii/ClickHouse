@@ -302,8 +302,24 @@ set(ARROW_SRCS
         "${LIBRARY_DIR}/util/trie.cc"
         "${LIBRARY_DIR}/util/utf8.cc"
         "${LIBRARY_DIR}/util/value_parsing.cc"
+        "${LIBRARY_DIR}/util/uri.cc"
 
         "${LIBRARY_DIR}/vendored/base64.cpp"
+        "${LIBRARY_DIR}/vendored/uriparser/UriEscape.c"
+        "${LIBRARY_DIR}/vendored/uriparser/UriParseBase.c"
+        "${LIBRARY_DIR}/vendored/uriparser/UriParse.c"
+        "${LIBRARY_DIR}/vendored/uriparser/UriQuery.c"
+        "${LIBRARY_DIR}/vendored/uriparser/UriCommon.c"
+        "${LIBRARY_DIR}/vendored/uriparser/UriMemory.c"
+        "${LIBRARY_DIR}/vendored/uriparser/UriIp4Base.c"
+        "${LIBRARY_DIR}/vendored/uriparser/UriIp4.c"
+
+        "${ARROW_SRC_DIR}/arrow/filesystem/filesystem.cc"
+        "${ARROW_SRC_DIR}/arrow/filesystem/s3fs.cc"
+        "${ARROW_SRC_DIR}/arrow/filesystem/path_util.cc"
+        "${ARROW_SRC_DIR}/arrow/filesystem/util_internal.cc"
+        "${ARROW_SRC_DIR}/arrow/filesystem/localfs.cc"
+        "${ARROW_SRC_DIR}/arrow/filesystem/mockfs.cc"
         ${ORC_SRCS}
         )
 
@@ -373,6 +389,7 @@ target_include_directories(${ARROW_LIBRARY} PRIVATE SYSTEM ${ORC_BUILD_INCLUDE_D
 target_include_directories(${ARROW_LIBRARY} PRIVATE SYSTEM ${ORC_ADDITION_SOURCE_DIR})
 target_include_directories(${ARROW_LIBRARY} PRIVATE SYSTEM ${ARROW_SRC_DIR})
 target_include_directories(${ARROW_LIBRARY} PRIVATE SYSTEM ${FLATBUFFERS_INCLUDE_DIR})
+target_include_directories(${ARROW_LIBRARY} PRIVATE SYSTEM ${FLATBUFFERS_INCLUDE_DIR})
 
 # === parquet
 
@@ -433,3 +450,5 @@ foreach (TOOL ${PARQUET_TOOLS})
     add_executable(${TOOL} "${TOOLS_DIR}/${TOOL}.cc")
     target_link_libraries(${TOOL} PRIVATE ${PARQUET_LIBRARY})
 endforeach ()
+
+target_link_libraries(${ARROW_LIBRARY} PRIVATE aws_s3)

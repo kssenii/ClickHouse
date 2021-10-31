@@ -3,6 +3,8 @@ SET(AWS_CORE_LIBRARY_DIR "${ClickHouse_SOURCE_DIR}/contrib/aws/aws-cpp-sdk-core"
 SET(AWS_CHECKSUMS_LIBRARY_DIR "${ClickHouse_SOURCE_DIR}/contrib/aws-checksums")
 SET(AWS_COMMON_LIBRARY_DIR "${ClickHouse_SOURCE_DIR}/contrib/aws-c-common")
 SET(AWS_EVENT_STREAM_LIBRARY_DIR "${ClickHouse_SOURCE_DIR}/contrib/aws-c-event-stream")
+SET(AWS_IDENTITY_MANAGEMENT_LIBRARY_DIR "${ClickHouse_SOURCE_DIR}/contrib/aws/aws-cpp-sdk-identity-management")
+SET(AWS_STS_LIBRARY_DIR "${ClickHouse_SOURCE_DIR}/contrib/aws/aws-cpp-sdk-sts")
 
 OPTION(USE_AWS_MEMORY_MANAGEMENT "Aws memory management" OFF)
 configure_file("${AWS_CORE_LIBRARY_DIR}/include/aws/core/SDKConfig.h.in"
@@ -64,12 +66,45 @@ file(GLOB AWS_CHECKSUMS_SOURCES
     "${AWS_CHECKSUMS_LIBRARY_DIR}/source/arm/*.c"
 )
 
+file(GLOB AWS_IDENTITY_MANAGEMENT_SOURCES
+    "${AWS_IDENTITY_MANAGEMENT_LIBRARY_DIR}/source/auth/STSAssumeRoleCredentialsProvider.cpp"
+)
+
+file(GLOB AWS_STS_SOURCES
+    "${AWS_STS_LIBRARY_DIR}/source/model/*.cpp"
+    "${AWS_STS_LIBRARY_DIR}/source/STSClient.cpp"
+    "${AWS_STS_LIBRARY_DIR}/source/STSErrorMarshaller.cpp"
+    "${AWS_STS_LIBRARY_DIR}/source/STSEndpoint.cpp"
+    "${AWS_STS_LIBRARY_DIR}/source/STSErrors.cpp"
+)
+
+    #"${AWS_STS_LIBRARY_DIR}/source/model/AssumeRoleRequest.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/Tag.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/PolicyDescriptorType.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/GetFederationTokenRequest.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/GetFederationTokenResult.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/GetSessionTokenRequest.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/GetSessionTokenResult.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/GetCallerIdentityResult.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/GetCallerIdentityRequest.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/STSClient.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/STSErrorMarshmaller.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/STSEndpoint.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/AssumeRoleResult.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/AssumeRoleWithSAMLRequest.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/AssumeRoleWithWebIdentityRequest.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/ResponseMetadata.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/FederatedUser.cpp"
+    #"${AWS_STS_LIBRARY_DIR}/source/model/Credentials.cpp"
+
 file(GLOB S3_UNIFIED_SRC
     ${AWS_EVENT_STREAM_SOURCES}
     ${AWS_COMMON_SOURCES}
     ${AWS_S3_SOURCES}
     ${AWS_S3_MODEL_SOURCES}
     ${AWS_CORE_SOURCES}
+    ${AWS_IDENTITY_MANAGEMENT_SOURCES}
+    ${AWS_STS_SOURCES}
 )
 
 set(S3_INCLUDES
@@ -78,6 +113,8 @@ set(S3_INCLUDES
     "${AWS_S3_LIBRARY_DIR}/include/"
     "${AWS_CORE_LIBRARY_DIR}/include/"
     "${CMAKE_CURRENT_BINARY_DIR}/include/"
+    "${AWS_IDENTITY_MANAGEMENT_LIBRARY_DIR}/include/"
+    "${AWS_STS_LIBRARY_DIR}/include/"
 )
 
 add_library(aws_s3_checksums ${AWS_CHECKSUMS_SOURCES})

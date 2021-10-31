@@ -18,7 +18,7 @@
 #include <Common/thread_local_rng.h>
 
 #include <Interpreters/Context.h>
-#include <IO/ReadBufferFromS3.h>
+#include <Disks/IO/ReadBufferFromS3.h>
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadHelpers.h>
 #include <IO/SeekAvoidingReadBuffer.h>

@@ -13,6 +13,11 @@
 
 #include <aws/s3/model/GetObjectResult.h>
 
+#include <arrow/filesystem/s3fs.h>
+#include <arrow/buffer.h>
+#include <arrow/io/memory.h>
+#include <arrow/result.h>
+
 namespace Aws::S3
 {
 class S3Client;
@@ -25,16 +30,20 @@ namespace DB
  */
 class ReadBufferFromS3 : public SeekableReadBufferWithSize
 {
-private:
-    std::shared_ptr<Aws::S3::S3Client> client_ptr;
+using S3ClientPtr = std::shared_ptr<Aws::S3::S3Client>;
+
+public:
+    S3ClientPtr client_ptr;
     String bucket;
     String key;
+private:
     UInt64 max_single_read_retries;
     off_t offset = 0;
     Aws::S3::Model::GetObjectResult read_result;
     std::unique_ptr<ReadBuffer> impl;
 
     Poco::Logger * log = &Poco::Logger::get("ReadBufferFromS3");
+
 
 public:
     ReadBufferFromS3(
@@ -48,10 +57,15 @@ public:
 
     bool nextImpl() override;
 
-    off_t seek(off_t off, int whence) override;
+    off_t seek(off_t new_offset, int whence) override;
     off_t getPosition() override;
 
     std::optional<size_t> getTotalSize() override;
+
+    arrow::fs::S3Options options;
+    arrow::io::IOContext context = arrow::io::default_io_context();
+    std::shared_ptr<arrow::fs::S3FileSystem> s3_fs;
+    std::shared_ptr<arrow::io::RandomAccessFile> openInputFile();
 
 private:
     std::unique_ptr<ReadBuffer> initialize();

@@ -23,7 +23,7 @@
 #include <Storages/StorageS3.h>
 #include <Storages/StorageS3Settings.h>
 
-#include <IO/ReadBufferFromS3.h>
+#include <Disks/IO/ReadBufferFromS3.h>
 #include <IO/ReadHelpers.h>
 #include <IO/WriteBufferFromS3.h>
 #include <IO/WriteHelpers.h>

@@ -5,7 +5,7 @@
 #include <Disks/IO/ReadBufferFromWebServer.h>
 
 #if USE_AWS_S3
-#include <IO/ReadBufferFromS3.h>
+#include <Disks/IO/ReadBufferFromS3.h>
 #endif
 
 #if USE_HDFS

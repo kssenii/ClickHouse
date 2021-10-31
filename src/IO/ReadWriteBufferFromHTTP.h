@@ -36,6 +36,7 @@ namespace ErrorCodes
     extern const int HTTP_RANGE_NOT_SATISFIABLE;
     extern const int BAD_ARGUMENTS;
     extern const int CANNOT_SEEK_THROUGH_FILE;
+    extern const int SEEK_POSITION_OUT_OF_BOUND;
 }
 
 template <typename SessionPtr>
@@ -85,7 +86,7 @@ public:
 namespace detail
 {
     template <typename UpdatableSessionPtr>
-    class ReadWriteBufferFromHTTPBase : public SeekableReadBuffer
+    class ReadWriteBufferFromHTTPBase : public SeekableReadBufferWithSize
     {
     public:
         using HTTPHeaderEntry = std::tuple<std::string, std::string>;
@@ -126,6 +127,7 @@ namespace detail
         ReadSettings settings;
         Poco::Logger * log;
 
+        String events;
         std::istream * call(Poco::URI uri_, Poco::Net::HTTPResponse & response, const std::string & method_)
         {
             // With empty path poco will send "POST  HTTP/1.1" its bug.
@@ -199,27 +201,42 @@ namespace detail
             return read_range.begin + offset_from_begin_pos;
         }
 
-        std::optional<size_t> getTotalSizeToRead()
+        std::optional<size_t> getTotalSize() override
         {
             if (read_range.end)
+            {
+                std::cerr << "\n\n\n\nkssenii size 1: " << *read_range.end << std::endl;
                 return *read_range.end - read_range.begin;
+            }
 
             Poco::Net::HTTPResponse response;
-            call(uri, response, Poco::Net::HTTPRequest::HTTP_HEAD);
-
-            while (isRedirect(response.getStatus()))
+            for (size_t i = 0; i < 10; ++i)
             {
-                Poco::URI uri_redirect(response.get("Location"));
-                remote_host_filter.checkURL(uri_redirect);
+                try
+                {
+                    call(uri, response, Poco::Net::HTTPRequest::HTTP_HEAD);
 
-                session->updateSession(uri_redirect);
+                    while (isRedirect(response.getStatus()))
+                    {
+                        Poco::URI uri_redirect(response.get("Location"));
+                        remote_host_filter.checkURL(uri_redirect);
 
-                istr = call(uri_redirect, response, method);
+                        session->updateSession(uri_redirect);
+
+                        istr = call(uri_redirect, response, method);
+                    }
+
+                    break;
+                }
+                catch (...)
+                {
+                }
             }
 
             if (response.hasContentLength())
                 read_range.end = read_range.begin + response.getContentLength();
 
+            std::cerr << "\n\n\n\nkssenii size 2: " << *read_range.end << std::endl;
             return read_range.end;
         }
 
@@ -240,7 +257,7 @@ namespace detail
             const RemoteHostFilter & remote_host_filter_ = {},
             bool delay_initialization = false,
             bool use_external_buffer_ = false)
-            : SeekableReadBuffer(nullptr, 0)
+            : SeekableReadBufferWithSize(nullptr, 0)
             , uri {uri_}
             , method {!method_.empty() ? method_ : out_stream_callback_ ? Poco::Net::HTTPRequest::HTTP_POST : Poco::Net::HTTPRequest::HTTP_GET}
             , session {session_}
@@ -264,8 +281,6 @@ namespace detail
 
             if (!delay_initialization)
                 initialize();
-
-            offset = start_byte;
         }
 
         void initialize()
@@ -312,42 +327,101 @@ namespace detail
 
         off_t getPosition() override
         {
-            return offset - available();
+            return getOffset() - available();
         }
 
-        off_t seek(off_t new_offset, int whence) override
+        off_t seek(off_t offset_, int whence) override
         {
-            size_t new_pos;
-            if (whence == SEEK_SET)
+            auto result_offset = getOffset();
+            if (whence == SEEK_CUR)
             {
-                new_pos = new_offset;
+                /// If position within current working buffer - shift pos.
+                if (!working_buffer.empty() && (getPosition() + offset_) < getOffset())
+                {
+                    pos += offset_;
+                    return getPosition();
+                }
+                else
+                {
+                    result_offset += offset_;
+                }
             }
-            else if (whence == SEEK_CUR)
+            else if (whence == SEEK_SET)
             {
-                new_pos = offset - (working_buffer.end() - pos) + new_offset;
+                /// If position is within current working buffer - shift pos.
+                if (!working_buffer.empty()
+                    && size_t(offset_) >= getOffset() - working_buffer.size()
+                    && offset_ < getOffset())
+                {
+                    pos = working_buffer.end() - (getOffset() - offset_);
+
+                    assert(pos >= working_buffer.begin());
+                    assert(pos <= working_buffer.end());
+
+                    return getPosition();
+                }
+                else
+                {
+                    result_offset = offset_;
+                    // if (size_t(offset) < prev + 2*buffer_size)
+                    //     return getPosition();
+                }
             }
             else
-            {
                 throw Exception("Only SEEK_SET or SEEK_CUR modes are allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
-            }
 
-            /// Position is unchanged.
-            if (new_pos + (working_buffer.end() - pos) == offset)
-                return new_pos;
+            pos = working_buffer.end();
 
-            if (file_offset_of_buffer_end - working_buffer.size() <= static_cast<size_t>(new_pos)
-                && new_pos <= file_offset_of_buffer_end)
+            read_range.begin = result_offset;
+            offset_from_begin_pos = 0;
+
+            if (impl)
             {
-                pos = working_buffer.end() - offset + new_pos;
-                assert(pos >= working_buffer.begin());
-                assert(pos <= working_buffer.end());
-
-                return new_pos;
+                events += "-- seek reset to " + toString(result_offset) + " --";
+                impl.reset();
+                // throw Exception("Seek is allowed only before first read attempt from the buffer.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
             }
 
-            initialize();
-            offset = new_offset;
-            return offset;
+            // if (impl)
+            //     throw Exception("Seek is allowed only before first read attempt from the buffer.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+
+            if (whence != SEEK_SET)
+                throw Exception("Only SEEK_SET mode is allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+
+            if (offset_ < 0)
+                throw Exception("Seek position is out of bounds. Offset: " + std::to_string(offset_), ErrorCodes::SEEK_POSITION_OUT_OF_BOUND);
+
+            return result_offset;
+            // size_t new_pos;
+            // if (whence == SEEK_SET)
+            //     new_pos = new_offset;
+            // else if (whence == SEEK_CUR)
+            //     new_pos = getOffset() - (working_buffer.end() - pos) + new_offset;
+            // else
+            //     throw Exception("Only SEEK_SET or SEEK_CUR modes are allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+
+            // /// Position is unchanged.
+            // if (new_pos + (working_buffer.end() - pos) == size_t(getOffset()))
+            //     return new_pos;
+
+            // size_t file_offset_of_buffer_end = read_range.begin + offset_from_begin_pos;
+            // if (file_offset_of_buffer_end - working_buffer.size() <= new_pos
+            //     && new_pos <= file_offset_of_buffer_end)
+            // {
+            //     pos = working_buffer.end() - getOffset() + new_pos;
+            //     assert(pos >= working_buffer.begin());
+            //     assert(pos <= working_buffer.end());
+            //     return new_pos;
+            // }
+            // std::cerr << "\n\nseek reset from " << getOffset() << " to " << new_pos << " ===================\n\n";
+
+            // read_range.begin = new_pos;
+            // offset_from_begin_pos = 0;
+
+            // initialize();
+
+            // assert(getOffset() == new_offset);
+            // return new_offset;
         }
 
         bool nextImpl() override
@@ -455,6 +529,7 @@ namespace detail
             internal_buffer = impl->buffer();
             working_buffer = internal_buffer;
             offset_from_begin_pos += working_buffer.size();
+            events += "-- read bytes " + toString(working_buffer.size()) + " --";
             return true;
         }
 
@@ -528,6 +603,11 @@ public:
             settings_, http_header_entries_, read_range_, remote_host_filter_,
             delay_initialization_, use_external_buffer_)
     {
+    }
+
+    ~ReadWriteBufferFromHTTP() override
+    {
+        std::cerr << "\n\n\n" << events << std::endl;
     }
 };
 

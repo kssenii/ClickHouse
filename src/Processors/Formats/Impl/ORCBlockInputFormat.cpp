@@ -5,7 +5,6 @@
 #include <IO/ReadBufferFromMemory.h>
 #include <IO/WriteHelpers.h>
 #include <IO/copyData.h>
-#include <arrow/adapters/orc/adapter.h>
 #include <arrow/io/memory.h>
 #include "ArrowBufferedStreams.h"
 #include "ArrowColumnToCHColumn.h"
@@ -32,6 +31,36 @@ ORCBlockInputFormat::ORCBlockInputFormat(ReadBuffer & in_, Block header_, const 
 {
 }
 
+// Chunk ORCBlockInputFormat::generate()
+// {
+//     Chunk res;
+//
+//     if (!file_reader)
+//         prepareReader();
+//
+//     if (stripe_current >= stripe_total)
+//         return res;
+//
+//     std::shared_ptr<arrow::RecordBatch> batch_result;
+//     std::cerr << fmt::format("\n\nReading from generate: {}, {}", stripe_current, include_indices.size()) << std::endl;
+//     // std::cerr << "\n\n\n\nInlcude indices: " << include_indices << "\n";
+//     arrow::Status batch_status = file_reader->ReadStripe(stripe_current, include_indices, &batch_result);
+//     if (!batch_status.ok())
+//         throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
+//                                "Error while reading batch of ORC data: {}", batch_status.ToString());
+//
+//     auto table_result = arrow::Table::FromRecordBatches({batch_result});
+//     if (!table_result.ok())
+//         throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
+//                                "Error while reading batch of ORC data: {}", table_result.status().ToString());
+//
+//     ++stripe_current;
+//
+//     arrow_column_to_ch_column->arrowTableToCHChunk(res, *table_result);
+//     std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
+//     return res;
+// }
+
 Chunk ORCBlockInputFormat::generate()
 {
     Chunk res;
@@ -39,28 +68,58 @@ Chunk ORCBlockInputFormat::generate()
     if (!file_reader)
         prepareReader();
 
-    if (stripe_current >= stripe_total)
-        return res;
+    while (true)
+    {
+        if (!batch_reader)
+        {
+            arrow::Status reader_status = file_reader->NextStripeReader(
+                DBMS_DEFAULT_BUFFER_SIZE, include_indices, &batch_reader);
+            if (!reader_status.ok())
+                throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
+                                       "Failed to create batch reader: {}",
+                                       reader_status.ToString());
+        }
 
-    std::shared_ptr<arrow::RecordBatch> batch_result;
-    std::cerr << fmt::format("\n\nReading from generate: {}, {}", stripe_current, include_indices.size()) << std::endl;
-    // std::cerr << "\n\n\n\nInlcude indices: " << include_indices << "\n";
-    arrow::Status batch_status = file_reader->ReadStripe(stripe_current, include_indices, &batch_result);
-    if (!batch_status.ok())
-        throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
-                               "Error while reading batch of ORC data: {}", batch_status.ToString());
+        if (!batch_reader)
+            break;
 
-    auto table_result = arrow::Table::FromRecordBatches({batch_result});
-    if (!table_result.ok())
-        throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
-                               "Error while reading batch of ORC data: {}", table_result.status().ToString());
+        std::shared_ptr<arrow::RecordBatch> batch_result;
+        arrow::Status batch_status = batch_reader->ReadNext(&batch_result);
+        if (!batch_status.ok())
+            throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
+                                   "Error while reading batch of ORC data: {}",
+                                   batch_status.ToString());
 
-    ++stripe_current;
+        if (!batch_result || !batch_result->num_rows())
+        {
+            batch_reader.reset();
+            continue;
+        }
 
-    arrow_column_to_ch_column->arrowTableToCHChunk(res, *table_result);
+        auto table_result = arrow::Table::FromRecordBatches({batch_result});
+        if (!table_result.ok())
+            throw ParsingException(ErrorCodes::CANNOT_READ_ALL_DATA,
+                                   "Error while reading batch of ORC data: {}",
+                                   table_result.status().ToString());
+
+        using NameToColumnPtr = std::unordered_map<std::string, std::shared_ptr<arrow::ChunkedArray>>;
+
+        NameToColumnPtr name_to_column_ptr;
+        for (const auto& column_name : column_names)
+        {
+            arrow::ArrayVector vec = {batch_result->GetColumnByName(column_name)};
+            std::shared_ptr<arrow::ChunkedArray> arrow_column = std::make_shared<arrow::ChunkedArray>(vec);
+            name_to_column_ptr[column_name] = arrow_column;
+        }
+        arrow_column_to_ch_column->arrowColumnsToCHChunk(res, name_to_column_ptr);
+        std::cerr << "\n\n\n\nread batch of rows: " << batch_result->num_rows() << "\n";
+        break;
+    }
+
     std::cerr << fmt::format("Result size: {}", res.getNumRows()) << std::endl;
     return res;
 }
+
 // Chunk ORCBlockInputFormat::generate()
 // {
 //     Chunk res;
@@ -119,8 +178,9 @@ static size_t countIndicesForType(std::shared_ptr<arrow::DataType> type)
 
 void ORCBlockInputFormat::prepareReader()
 {
-    THROW_ARROW_NOT_OK(arrow::adapters::orc::ORCFileReader::Open(asArrowFile(*in), arrow::default_memory_pool(), &file_reader));
+    THROW_ARROW_NOT_OK(arrow::adapters::orc::ORCFileReader::Open(asArrowFile(*in, format_settings), arrow::default_memory_pool(), &file_reader));
     stripe_total = file_reader->NumberOfStripes();
+    std::cerr << "\n\n\n\nTOTAL KSSENII: " << stripe_total << std::endl;
     stripe_current = 0;
 
     std::shared_ptr<arrow::Schema> schema;
@@ -143,6 +203,7 @@ void ORCBlockInputFormat::prepareReader()
         const auto & name = schema->field(i)->name();
         if (getPort().getHeader().has(name) || nested_table_names.contains(name))
         {
+            column_names.push_back(name);
             for (int j = 0; j != indexes_count; ++j)
                 include_indices.push_back(index + j);
         }

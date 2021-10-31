@@ -2,8 +2,9 @@
 
 #if USE_AWS_S3
 
+#include "ReadBufferFromS3.h"
+
 #include <IO/ReadBufferFromIStream.h>
-#include <IO/ReadBufferFromS3.h>
 #include <Common/Stopwatch.h>
 
 #include <aws/s3/S3Client.h>
@@ -15,12 +16,16 @@
 
 #include <utility>
 
+#include <arrow/buffer.h>
+#include <arrow/io/memory.h>
+#include <arrow/result.h>
 
 namespace ProfileEvents
 {
     extern const Event S3ReadMicroseconds;
     extern const Event S3ReadBytes;
     extern const Event S3ReadRequestsErrors;
+    extern const Event S3SeeksWithReconnect;
 }
 
 namespace DB
@@ -143,6 +148,7 @@ bool ReadBufferFromS3::nextImpl()
     BufferBase::set(impl->buffer().begin(), impl->buffer().size(), impl->offset()); /// use the buffer returned by `impl`
 
     ProfileEvents::increment(ProfileEvents::S3ReadBytes, working_buffer.size());
+    std::cerr << "\n\nread bytes " << working_buffer.size() << " ===================\n\n";
     offset += working_buffer.size();
 
     return true;
@@ -192,12 +198,9 @@ off_t ReadBufferFromS3::seek(off_t offset_, int whence)
     if (impl)
     {
         std::cerr << "\n\nseek reset from " << prev << " to " << offset_ << " ===================\n\n";
+        ProfileEvents::increment(ProfileEvents::S3SeeksWithReconnect);
         impl.reset();
-        // throw Exception("Seek is allowed only before first read attempt from the buffer.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
     }
-
-    // if (impl)
-    //     throw Exception("Seek is allowed only before first read attempt from the buffer.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
 
     if (whence != SEEK_SET)
         throw Exception("Only SEEK_SET mode is allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
@@ -210,6 +213,45 @@ off_t ReadBufferFromS3::seek(off_t offset_, int whence)
     return offset;
 }
 
+// off_t ReadBufferFromS3::seek(off_t new_offset, int whence)
+// {
+//     size_t new_pos;
+//     if (whence == SEEK_SET)
+//     {
+//         new_pos = new_offset;
+//     }
+//     else if (whence == SEEK_CUR)
+//     {
+//         new_pos = offset - (working_buffer.end() - pos) + new_offset;
+//     }
+//     else
+//     {
+//         throw Exception("Only SEEK_SET or SEEK_CUR modes are allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+//     }
+//
+//     /// Position is unchanged.
+//     if (new_pos + (working_buffer.end() - pos) == size_t(offset))
+//         return new_pos;
+//
+//     if (offset - working_buffer.size() <= new_pos && new_pos <= size_t(offset))
+//     {
+//         pos = working_buffer.end() - offset + new_pos;
+//         assert(pos >= working_buffer.begin());
+//         assert(pos <= working_buffer.end());
+//
+//         return new_pos;
+//     }
+//
+//     std::cerr << "\n\nseek reset from " << offset << " to " << new_pos << " ===================\n\n";
+//     if (impl)
+//     {
+//         impl.reset();
+//         // throw Exception("Seek is allowed only before first read attempt from the buffer.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
+//     }
+//
+//     offset = new_pos;
+//     return offset;
+// }
 off_t ReadBufferFromS3::getPosition()
 {
     return offset - available();
@@ -263,6 +305,24 @@ std::optional<size_t> ReadBufferFromS3::getTotalSize()
     auto head_result = outcome.GetResultWithOwnership();
     file_size = head_result.GetContentLength();
     return file_size;
+}
+
+
+std::shared_ptr<arrow::io::RandomAccessFile> ReadBufferFromS3::openInputFile()
+{
+  //   if (!s3_fs)
+  //   {
+  //       auto fs_result = arrow::fs::S3FileSystem::Make(options);
+  //       if (!fs_result.ok())
+  //           throw Exception(ErrorCodes::S3_ERROR, "Cannot make s3 fs: {}", fs_result.status().message());
+  //       s3_fs = fs_result.ValueOrDie();
+  //   }
+  //   auto file = s3_fs->OpenInputFile(key);
+  //   auto file = arrow::s3::filesystem::ObjectInputFile(client_ptr, context, key);
+  //   if (!file.ok())
+  //       throw Exception(ErrorCodes::S3_ERROR, "Cannot open s3 input file");
+  //   return file.ValueOrDie();
+    return nullptr;
 }
 
 }

@@ -27,6 +27,8 @@ public:
 
     void arrowTableToCHChunk(Chunk & res, std::shared_ptr<arrow::Table> & table);
 
+    void arrowColumnsToCHChunk(Chunk & res, std::unordered_map<std::string, std::shared_ptr<arrow::ChunkedArray>> & name_to_column_ptr);
+
 private:
     const Block header;
     const std::string format_name;

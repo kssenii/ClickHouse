@@ -13,7 +13,7 @@ namespace DB
 {
 
 class ReadBufferFromRemoteFSGather;
-struct ReadSettings;
+struct ReadSetting;
 
 /**
  * Reads data from S3/HDFS/Web using stored paths in metadata.

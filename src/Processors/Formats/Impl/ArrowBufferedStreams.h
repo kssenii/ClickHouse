@@ -10,9 +10,11 @@ namespace DB
 {
 
 class ReadBuffer;
+class WriteBuffer;
+
 class SeekableReadBuffer;
 class SeekableReadBufferWithSize;
-class WriteBuffer;
+struct FormatSettings;
 
 class ArrowBufferedOutputStream : public arrow::io::OutputStream
 {
@@ -84,7 +86,7 @@ private:
     ARROW_DISALLOW_COPY_AND_ASSIGN(ArrowInputStreamFromReadBuffer);
 };
 
-std::shared_ptr<arrow::io::RandomAccessFile> asArrowFile(ReadBuffer & in);
+std::shared_ptr<arrow::io::RandomAccessFile> asArrowFile(ReadBuffer & in, const FormatSettings & settings);
 
 }
 
