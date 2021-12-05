@@ -385,6 +385,22 @@ protected:
     bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
+/// CREATE|ATTACH SUBSCRIPTION [IF NOT EXISTS] [db.]name [TO [db.]name]
+class ParserCreateSubscriptionQuery : public IParserBase
+{
+protected:
+    const char * getName() const override { return "CREATE SUBSCRIPTION query"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
+/// CREATE|ATTACH STREAM [IF NOT EXISTS] [db.]name AS SELECT ...
+class ParserCreateStreamQuery : public IParserBase
+{
+protected:
+    const char * getName() const override { return "CREATE STREAM query"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
 /// CREATE|ATTACH DATABASE db [ENGINE = engine]
 class ParserCreateDatabaseQuery : public IParserBase
 {

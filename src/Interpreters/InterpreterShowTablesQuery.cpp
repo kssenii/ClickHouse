@@ -5,6 +5,9 @@
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/executeQuery.h>
 #include <Interpreters/InterpreterShowTablesQuery.h>
+#include <DataTypes/DataTypeString.h>
+#include <Processors/Sources/SourceFromSingleChunk.h>
+#include <Storages/IStorage.h>
 #include <Common/typeid_cast.h>
 #include <IO/Operators.h>
 
@@ -142,6 +145,26 @@ String InterpreterShowTablesQuery::getRewrittenQuery()
 
 BlockIO InterpreterShowTablesQuery::execute()
 {
+    auto & query = query_ptr->as<ASTShowTablesQuery &>();
+
+    if (query.subscriptions)
+    {
+        String current_database = getContext()->getCurrentDatabase();
+        if (query.from_stream.database_name.empty())
+            query.from_stream.database_name = current_database;
+        auto from = DatabaseCatalog::instance().getTable(StorageID(query.from_stream), getContext());
+        auto subscriptions = from->getSubscriptions();
+        auto column = DataTypeString().createColumn();
+        for (const auto & table_name : subscriptions)
+            column->insert(table_name);
+        ColumnWithTypeAndName result_block(std::move(column), std::make_shared<DataTypeString>(), "Subscriptions");
+        Pipe pipe(std::make_shared<SourceFromSingleChunk>(Block({result_block})));
+        BlockIO res;
+        res.pipeline = QueryPipeline(std::move(pipe));
+
+        return res;
+    }
+
     return executeQuery(getRewrittenQuery(), getContext(), true);
 }
 

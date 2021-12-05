@@ -91,6 +91,13 @@ StoragePtr StorageFactory::get(
 
         name = "Dictionary";
     }
+    else if (query.is_stream)
+    {
+        if (query.storage)
+            throw Exception("Specifying ENGINE is not allowed for a Stream", ErrorCodes::INCORRECT_QUERY);
+
+        name = "Stream";
+    }
     else
     {
         /// Check for some special types, that are not allowed to be stored in tables. Example: NULL data type.

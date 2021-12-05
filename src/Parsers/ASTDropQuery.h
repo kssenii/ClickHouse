@@ -27,14 +27,17 @@ public:
 
     /// We dropping dictionary, so print correct word
     bool is_dictionary{false};
-
-    /// Same as above
     bool is_view{false};
+    bool is_subscription{false};
+    bool is_stream{false};
 
     bool no_delay{false};
 
     // We detach the object permanently, so it will not be reattached back during server restart.
     bool permanently{false};
+
+    ASTPtr subscription_from;
+    ASTPtr subscription_to;
 
     /** Get the text that identifies this element. */
     String getID(char) const override;

@@ -16,6 +16,9 @@ bool parseDropQuery(IParser::Pos & pos, ASTPtr & node, Expected & expected, cons
     ParserKeyword s_table("TABLE");
     ParserKeyword s_dictionary("DICTIONARY");
     ParserKeyword s_view("VIEW");
+    ParserKeyword s_subscription("SUBSCRIPTION");
+    ParserKeyword s_stream("STREAM");
+    ParserCompoundIdentifier table_name_p(true);
     ParserKeyword s_database("DATABASE");
     ParserToken s_dot(TokenType::Dot);
     ParserKeyword s_if_exists("IF EXISTS");
@@ -26,15 +29,33 @@ bool parseDropQuery(IParser::Pos & pos, ASTPtr & node, Expected & expected, cons
 
     ASTPtr database;
     ASTPtr table;
+    ASTPtr subscription_from_table;
+    ASTPtr subscription_to_table;
     String cluster_str;
     bool if_exists = false;
     bool temporary = false;
     bool is_dictionary = false;
     bool is_view = false;
+    bool is_subscription = false;
+    bool is_stream = false;
     bool no_delay = false;
     bool permanently = false;
 
-    if (s_database.ignore(pos, expected))
+    if (s_subscription.ignore(pos, expected))
+    {
+        is_subscription = true;
+        if (s_if_exists.ignore(pos, expected))
+            if_exists = true;
+        if (!ParserKeyword{"FROM"}.ignore(pos, expected))
+            return false;
+        if (!table_name_p.parse(pos, subscription_from_table, expected))
+            return false;
+        if (!ParserKeyword{"TO"}.ignore(pos, expected))
+            return false;
+        if (!table_name_p.parse(pos, subscription_to_table, expected))
+            return false;
+    }
+    else if (s_database.ignore(pos, expected))
     {
         if (s_if_exists.ignore(pos, expected))
             if_exists = true;
@@ -46,13 +67,15 @@ bool parseDropQuery(IParser::Pos & pos, ASTPtr & node, Expected & expected, cons
     {
         if (s_view.ignore(pos, expected))
             is_view = true;
+        else if (s_stream.ignore(pos, expected))
+            is_stream = true;
         else if (s_dictionary.ignore(pos, expected))
             is_dictionary = true;
         else if (s_temporary.ignore(pos, expected))
             temporary = true;
 
         /// for TRUNCATE queries TABLE keyword is assumed as default and can be skipped
-        if (!is_view && !is_dictionary && (!s_table.ignore(pos, expected) && kind != ASTDropQuery::Kind::Truncate))
+        if (!is_view && !is_stream && !is_dictionary && (!s_table.ignore(pos, expected) && kind != ASTDropQuery::Kind::Truncate))
         {
             return false;
         }
@@ -93,10 +116,14 @@ bool parseDropQuery(IParser::Pos & pos, ASTPtr & node, Expected & expected, cons
     query->temporary = temporary;
     query->is_dictionary = is_dictionary;
     query->is_view = is_view;
+    query->is_stream = is_stream;
     query->no_delay = no_delay;
     query->permanently = permanently;
     query->database = database;
     query->table = table;
+    query->is_subscription = is_subscription;
+    query->subscription_from = subscription_from_table;
+    query->subscription_to = subscription_to_table;
 
     if (database)
         query->children.push_back(database);

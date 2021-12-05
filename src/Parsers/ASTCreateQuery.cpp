@@ -268,8 +268,12 @@ void ASTCreateQuery::formatQueryImpl(const FormatSettings & settings, FormatStat
             what = "MATERIALIZED VIEW";
         else if (is_live_view)
             what = "LIVE VIEW";
-        if (is_window_view)
+        else if (is_window_view)
             what = "WINDOW VIEW";
+        else if (is_subscription)
+            what = "SUBSCRIPTION";
+        else if (is_stream)
+            what = "STREAM";
 
         settings.ostr
             << (settings.hilite ? hilite_keyword : "")
@@ -328,7 +332,7 @@ void ASTCreateQuery::formatQueryImpl(const FormatSettings & settings, FormatStat
 
     if (to_table_id)
     {
-        assert((is_materialized_view || is_window_view) && to_inner_uuid == UUIDHelpers::Nil);
+        assert(supportsToTable() && to_inner_uuid == UUIDHelpers::Nil);
         settings.ostr
             << (settings.hilite ? hilite_keyword : "") << " TO " << (settings.hilite ? hilite_none : "")
             << (!to_table_id.database_name.empty() ? backQuoteIfNeed(to_table_id.database_name) + "." : "")

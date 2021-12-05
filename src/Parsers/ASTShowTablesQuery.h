@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <Parsers/IAST.h>
 #include <Parsers/ASTQueryWithOutput.h>
+#include <Interpreters/StorageID.h>
 
 
 namespace DB
@@ -18,6 +19,7 @@ public:
     bool clusters{false};
     bool cluster{false};
     bool dictionaries{false};
+    bool subscriptions{false};
     bool m_settings{false};
     bool changed{false};
     bool temporary{false};
@@ -31,6 +33,7 @@ public:
 
     ASTPtr where_expression;
     ASTPtr limit_length;
+    StorageID from_stream = StorageID::createEmpty();
 
     /** Get the text that identifies this element. */
     String getID(char) const override { return "ShowTables"; }

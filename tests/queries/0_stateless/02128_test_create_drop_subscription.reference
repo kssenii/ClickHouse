@@ -1,0 +1,9 @@
+-- { echo  }
+drop table if exists subscriber;
+drop table if exists src;
+drop stream if exists s;
+create table subscriber (a Int32) engine=Memory;
+create table src (a Int32) engine=Memory;
+create stream s as select count() from src;
+create subscription from subscriber to s;
+insert into src select number from numbers(10);

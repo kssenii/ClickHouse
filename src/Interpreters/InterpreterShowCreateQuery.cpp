@@ -45,6 +45,7 @@ QueryPipeline InterpreterShowCreateQuery::executeImpl()
     ASTQueryWithTableAndOutput * show_query;
     if ((show_query = query_ptr->as<ASTShowCreateTableQuery>()) ||
         (show_query = query_ptr->as<ASTShowCreateViewQuery>()) ||
+        (show_query = query_ptr->as<ASTShowCreateStreamQuery>()) ||
         (show_query = query_ptr->as<ASTShowCreateDictionaryQuery>()))
     {
         auto resolve_table_type = show_query->temporary ? Context::ResolveExternal : Context::ResolveOrdinary;

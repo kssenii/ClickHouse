@@ -24,6 +24,7 @@ enum class AccessType
                                          implicitly enabled with any grant on the column */\
     M(SHOW_DICTIONARIES, "", DICTIONARY, SHOW) /* allows to execute SHOW DICTIONARIES, SHOW CREATE DICTIONARY, EXISTS <dictionary>;
                                                   implicitly enabled by any grant on the dictionary */\
+    M(SHOW_SUBSCRIPTIONS, "", SUBSCRIPTION, SHOW) /* allows to execute SHOW SUBSCRIPTIONS */\
     M(SHOW, "", GROUP, ALL) /* allows to execute SHOW, USE, EXISTS, CHECK, DESCRIBE */\
     \
     M(SELECT, "", COLUMN, ALL) \
@@ -87,6 +88,8 @@ enum class AccessType
     M(CREATE_TEMPORARY_TABLE, "", GLOBAL, CREATE) /* allows to create and manipulate temporary tables;
                                                      implicitly enabled by the grant CREATE_TABLE on any table */ \
     M(CREATE_FUNCTION, "", DATABASE, CREATE) /* allows to execute CREATE FUNCTION */ \
+    M(CREATE_SUBSCRIPTION, "", SUBSCRIPTION, CREATE) /* allows to execute CREATE SUBSCRIPTION */ \
+    M(CREATE_STREAM, "", STREAM, CREATE) /* allows to execute CREATE STREAM */ \
     M(CREATE, "", GROUP, ALL) /* allows to execute {CREATE|ATTACH} */ \
     \
     M(DROP_DATABASE, "", DATABASE, DROP) /* allows to execute {DROP|DETACH} DATABASE */\
@@ -95,6 +98,7 @@ enum class AccessType
                                     implicitly enabled by the grant DROP_TABLE */\
     M(DROP_DICTIONARY, "", DICTIONARY, DROP) /* allows to execute {DROP|DETACH} DICTIONARY */\
     M(DROP_FUNCTION, "", DATABASE, DROP) /* allows to execute DROP FUNCTION */\
+    M(DROP_STREAM, "", STREAM, DROP) /* allows to execute DROP STREAM */\
     M(DROP, "", GROUP, ALL) /* allows to execute {DROP|DETACH} */\
     \
     M(TRUNCATE, "TRUNCATE TABLE", TABLE, ALL) \

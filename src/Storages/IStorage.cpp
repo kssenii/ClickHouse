@@ -13,6 +13,7 @@
 #include <Processors/QueryPlan/ReadFromPreparedSource.h>
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Storages/AlterCommands.h>
+#include <Storages/StorageStream.h>
 
 
 namespace DB
@@ -22,6 +23,7 @@ namespace ErrorCodes
     extern const int TABLE_IS_DROPPED;
     extern const int NOT_IMPLEMENTED;
     extern const int DEADLOCK_AVOIDED;
+    extern const int QUERY_NOT_ALLOWED;
 }
 
 bool IStorage::isVirtualColumn(const String & column_name, const StorageMetadataPtr & metadata_snapshot) const
@@ -203,6 +205,17 @@ NameDependencies IStorage::getDependentViewsByColumn(ContextPtr context) const
         }
     }
     return name_deps;
+}
+
+DependentTables IStorage::getSubscriptions()
+{
+    if (!isStream())
+        throw Exception(ErrorCodes::QUERY_NOT_ALLOWED, "Cannot show subscriptions for engine {}, must be a Stream", getName());
+    auto subscriptions = StorageStream::getSubscriptions(assert_cast<const StorageStream &>(*this));
+    DependentTables res;
+    for (const auto & table_id : subscriptions)
+        res.push_back(table_id.table_name);
+    return res;
 }
 
 bool IStorage::isStaticStorage() const

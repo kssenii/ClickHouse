@@ -7,6 +7,7 @@
 #include <Parsers/ExpressionElementParsers.h>
 #include <Parsers/ExpressionListParsers.h>
 #include <Parsers/parseIdentifierOrStringLiteral.h>
+#include <Parsers/ASTIdentifier.h>
 
 #include <Common/typeid_cast.h>
 
@@ -24,6 +25,7 @@ bool ParserShowTablesQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     ParserKeyword s_clusters("CLUSTERS");
     ParserKeyword s_cluster("CLUSTER");
     ParserKeyword s_dictionaries("DICTIONARIES");
+    ParserKeyword s_subscriptions("SUBSCRIPTIONS");
     ParserKeyword s_settings("SETTINGS");
     ParserKeyword s_changed("CHANGED");
     ParserKeyword s_from("FROM");
@@ -36,9 +38,11 @@ bool ParserShowTablesQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     ParserStringLiteral like_p;
     ParserIdentifier name_p;
     ParserExpressionWithOptionalAlias exp_elem(false);
+    ParserCompoundIdentifier table_name_p(true);
 
     ASTPtr like;
     ASTPtr database;
+    ASTPtr stream;
 
     auto query = std::make_shared<ASTShowTablesQuery>();
 
@@ -100,6 +104,38 @@ bool ParserShowTablesQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
             return false;
 
         query->cluster_str = std::move(cluster_str);
+    }
+    else if (s_subscriptions.ignore(pos, expected))
+    {
+        query->subscriptions = true;
+
+        if (s_from.ignore(pos, expected) || s_in.ignore(pos, expected))
+        {
+            if (!table_name_p.parse(pos, stream, expected))
+                return false;
+        }
+        else
+            return false;
+
+        if (s_not.ignore(pos, expected))
+            query->not_like = true;
+
+        if (bool insensitive = s_ilike.ignore(pos, expected); insensitive || s_like.ignore(pos, expected))
+        {
+            if (insensitive)
+                query->case_insensitive_like = true;
+
+            if (!like_p.parse(pos, like, expected))
+                return false;
+        }
+        else if (query->not_like)
+            return false;
+
+        if (s_limit.ignore(pos, expected))
+        {
+            if (!exp_elem.parse(pos, query->limit_length, expected))
+                return false;
+        }
     }
     else if (bool changed = s_changed.ignore(pos, expected); changed || s_settings.ignore(pos, expected))
     {
@@ -170,7 +206,7 @@ bool ParserShowTablesQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     }
 
     tryGetIdentifierNameInto(database, query->from);
-
+    query->from_stream = stream->as<ASTTableIdentifier>()->getTableId();
     if (like)
         query->like = safeGet<const String &>(like->as<ASTLiteral &>().value);
 

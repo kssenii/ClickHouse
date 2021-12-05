@@ -60,6 +60,8 @@ BlockIO InterpreterDropQuery::execute()
         return executeToTable(drop);
     else if (drop.database)
         return executeToDatabase(drop);
+    else if (drop.subscription_from)
+        return executeToSubscription(drop);
     else
         throw Exception("Nothing to drop, both names are empty", ErrorCodes::LOGICAL_ERROR);
 }
@@ -141,6 +143,8 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
             drop_storage = AccessType::DROP_VIEW;
         else if (table->isDictionary())
             drop_storage = AccessType::DROP_DICTIONARY;
+        else if (table->isStream())
+            drop_storage = AccessType::DROP_STREAM;
         else
             drop_storage = AccessType::DROP_TABLE;
 
@@ -298,6 +302,20 @@ BlockIO InterpreterDropQuery::executeToDatabase(const ASTDropQuery & query)
             waitForTableToBeActuallyDroppedOrDetached(query, database, table_uuid);
     }
     return res;
+}
+
+BlockIO InterpreterDropQuery::executeToSubscription(const ASTDropQuery & query)
+{
+    auto from_table_id = StorageID(query.subscription_from);
+    auto to_table_id = StorageID(query.subscription_to);
+    if (from_table_id.database_name.empty())
+        from_table_id.database_name = getContext()->getCurrentDatabase();
+    if (to_table_id.database_name.empty())
+        to_table_id.database_name = getContext()->getCurrentDatabase();
+
+    auto to_table = DatabaseCatalog::instance().getTable(to_table_id, getContext());
+    to_table->unsubscribe(from_table_id, query.if_exists);
+    return {};
 }
 
 BlockIO InterpreterDropQuery::executeToDatabaseImpl(const ASTDropQuery & query, DatabasePtr & database, std::vector<UUID> & uuids_to_wait)

@@ -114,6 +114,8 @@ namespace
             DATABASE,
             TABLE,
             VIEW = TABLE,
+            STREAM = TABLE,
+            SUBSCRIPTION,
             COLUMN,
             DICTIONARY,
         };

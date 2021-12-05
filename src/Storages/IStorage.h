@@ -63,7 +63,8 @@ struct StreamLocalLimits;
 class EnabledQuota;
 struct SelectQueryInfo;
 
-using NameDependencies = std::unordered_map<String, std::vector<String>>;
+using DependentTables = std::vector<String>;
+using NameDependencies = std::unordered_map<String, DependentTables>;
 using DatabaseAndTableName = std::pair<String, String>;
 
 class IBackup;
@@ -118,6 +119,9 @@ public:
 
     /// Returns true if the storage is a view of a table or another view.
     virtual bool isView() const { return false; }
+
+    /// Returns true if the storage is a stream.
+    virtual bool isStream() const { return false; }
 
     /// Returns true if the storage is dictionary
     virtual bool isDictionary() const { return false; }
@@ -206,6 +210,8 @@ public:
     Names getAllRegisteredNames() const override;
 
     NameDependencies getDependentViewsByColumn(ContextPtr context) const;
+
+    DependentTables getSubscriptions();
 
     /// Prepares entries to backup data of the storage.
     virtual BackupEntries backup(const ASTs & partitions, ContextPtr context);
@@ -300,6 +306,16 @@ public:
         unsigned /*num_streams*/)
     {
         throw Exception("Method watch is not supported by storage " + getName(), ErrorCodes::NOT_IMPLEMENTED);
+    }
+
+    virtual void subscribe(const StorageID & /* subscriber_storage_id */, bool /* if_not_subscribed */)
+    {
+        throw Exception("Method subscribe is not supported by storage " + getName(), ErrorCodes::NOT_IMPLEMENTED);
+    }
+
+    virtual void unsubscribe(const StorageID & /* subscriber_storage_id */, bool /* if_subscribed */)
+    {
+        throw Exception("Method unsubscribe is not supported by storage " + getName(), ErrorCodes::NOT_IMPLEMENTED);
     }
 
     /// Returns true if FINAL modifier must be added to SELECT query depending on required columns.

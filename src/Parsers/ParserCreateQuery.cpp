@@ -786,7 +786,6 @@ bool ParserCreateLiveViewQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & e
 bool ParserCreateWindowViewQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ParserKeyword s_create("CREATE");
-    ParserKeyword s_temporary("TEMPORARY");
     ParserKeyword s_attach("ATTACH");
     ParserKeyword s_if_not_exists("IF NOT EXISTS");
     ParserCompoundIdentifier table_name_p(true);
@@ -928,6 +927,148 @@ bool ParserCreateWindowViewQuery::parseImpl(Pos & pos, ASTPtr & node, Expected &
     tryGetIdentifierNameInto(as_database, query->as_database);
     tryGetIdentifierNameInto(as_table, query->as_table);
     query->set(query->select, select);
+
+    return true;
+}
+
+bool ParserCreateSubscriptionQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
+{
+    ParserKeyword s_create("CREATE");
+    ParserKeyword s_attach("ATTACH");
+    ParserKeyword s_subscription("SUBSCRIPTION");
+    ParserKeyword s_if_not_exists("IF NOT EXISTS");
+    ParserKeyword s_temporary("TEMPORARY");
+    ParserKeyword s_from("FROM");
+    ParserKeyword s_to("TO");
+    ParserCompoundIdentifier table_name_p(true);
+
+    ASTPtr table;
+    ASTPtr from_table;
+    ASTPtr to_table;
+    bool attach = false;
+
+    bool if_not_exists = false;
+    bool is_temporary = false;
+
+    if (!s_create.ignore(pos, expected))
+    {
+        if (s_attach.ignore(pos, expected))
+            attach = true;
+        else
+            return false;
+    }
+
+    if (s_temporary.ignore(pos, expected))
+        is_temporary = true;
+
+    if (!s_subscription.ignore(pos, expected))
+        return false;
+
+    if (s_if_not_exists.ignore(pos, expected))
+       if_not_exists = true;
+
+    if (s_from.ignore(pos, expected))
+    {
+        if (!table_name_p.parse(pos, from_table, expected))
+            return false;
+    }
+    else
+        return false;
+
+    if (s_to.ignore(pos, expected))
+    {
+        if (!table_name_p.parse(pos, to_table, expected))
+            return false;
+    }
+    else
+        return false;
+
+    auto query = std::make_shared<ASTCreateQuery>();
+    node = query;
+
+    query->if_not_exists = if_not_exists;
+    query->is_subscription = true;
+    query->attach = attach;
+    query->temporary = is_temporary;
+
+    StorageID table_id = from_table->as<ASTTableIdentifier>()->getTableId();
+    query->setDatabase(table_id.database_name);
+    query->setTable(table_id.table_name);
+    query->uuid = table_id.uuid;
+
+    if (to_table)
+        query->to_table_id = to_table->as<ASTTableIdentifier>()->getTableId();
+
+    return true;
+}
+
+bool ParserCreateStreamQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
+{
+    ParserKeyword s_create("CREATE");
+    ParserKeyword s_attach("ATTACH");
+    ParserKeyword s_stream("STREAM");
+    ParserKeyword s_if_not_exists("IF NOT EXISTS");
+    ParserCompoundIdentifier table_name_p(true);
+    ParserKeyword s_as("AS");
+    ParserSelectWithUnionQuery select_p;
+    ParserToken s_lparen(TokenType::OpeningRoundBracket);
+    ParserToken s_rparen(TokenType::ClosingRoundBracket);
+    ParserTablePropertiesDeclarationList table_properties_p;
+
+    ASTPtr table;
+    ASTPtr select;
+    ASTPtr columns_list;
+
+    bool attach = false;
+    bool if_not_exists = false;
+
+    if (!s_create.ignore(pos, expected))
+    {
+        if (s_attach.ignore(pos, expected))
+            attach = true;
+        else
+            return false;
+    }
+
+    if (!s_stream.ignore(pos, expected))
+        return false;
+
+    if (s_if_not_exists.ignore(pos, expected))
+       if_not_exists = true;
+
+    if (!table_name_p.parse(pos, table, expected))
+        return false;
+
+    /// Optional - a list of columns can be specified. It must fully comply with SELECT.
+    if (s_lparen.ignore(pos, expected))
+    {
+        if (!table_properties_p.parse(pos, columns_list, expected))
+            return false;
+
+        if (!s_rparen.ignore(pos, expected))
+            return false;
+    }
+
+    if (!s_as.ignore(pos, expected))
+        return false;
+
+    if (!select_p.parse(pos, select, expected))
+        return false;
+
+    auto query = std::make_shared<ASTCreateQuery>();
+    node = query;
+
+    query->attach = attach;
+    query->if_not_exists = if_not_exists;
+    query->is_stream = true;
+
+    StorageID table_id = table->as<ASTTableIdentifier>()->getTableId();
+    query->setDatabase(table_id.database_name);
+    query->setTable(table_id.table_name);
+    query->uuid = table_id.uuid;
+
+    query->set(query->select, select);
+    query->set(query->columns_list, columns_list);
 
     return true;
 }
@@ -1270,13 +1411,17 @@ bool ParserCreateQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     ParserCreateDictionaryQuery dictionary_p;
     ParserCreateLiveViewQuery live_view_p;
     ParserCreateWindowViewQuery window_view_p;
+    ParserCreateSubscriptionQuery subscription_p;
+    ParserCreateStreamQuery stream_p;
 
     return table_p.parse(pos, node, expected)
         || database_p.parse(pos, node, expected)
         || view_p.parse(pos, node, expected)
         || dictionary_p.parse(pos, node, expected)
         || live_view_p.parse(pos, node, expected)
-        || window_view_p.parse(pos, node, expected);
+        || window_view_p.parse(pos, node, expected)
+        || subscription_p.parse(pos, node, expected)
+        || stream_p.parse(pos, node, expected);
 }
 
 }

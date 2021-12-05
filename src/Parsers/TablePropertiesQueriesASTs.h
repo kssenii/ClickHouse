@@ -30,6 +30,13 @@ struct ASTExistsViewQueryIDAndQueryNames
     static constexpr auto QueryTemporary = "";
 };
 
+struct ASTExistsStreamQueryIDAndQueryNames
+{
+    static constexpr auto ID = "ExistsStreamQuery";
+    static constexpr auto Query = "EXISTS STREAM";
+    /// No temporary view are supported, just for parsing
+    static constexpr auto QueryTemporary = "";
+};
 
 struct ASTExistsDictionaryQueryIDAndQueryNames
 {
@@ -52,6 +59,13 @@ struct ASTShowCreateViewQueryIDAndQueryNames
     static constexpr auto Query = "SHOW CREATE VIEW";
     /// No temporary view are supported, just for parsing
     static constexpr auto QueryTemporary = "";
+};
+
+struct ASTShowCreateStreamQueryIDAndQueryNames
+{
+    static constexpr auto ID = "ShowCreateStreamQuery";
+    static constexpr auto Query = "SHOW CREATE STREAM";
+    static constexpr auto QueryTemporary = "SHOW CREAYE TEMPORARY STREAM";
 };
 
 struct ASTShowCreateDatabaseQueryIDAndQueryNames
@@ -78,9 +92,11 @@ struct ASTDescribeQueryExistsQueryIDAndQueryNames
 
 using ASTExistsTableQuery = ASTQueryWithTableAndOutputImpl<ASTExistsTableQueryIDAndQueryNames>;
 using ASTExistsViewQuery = ASTQueryWithTableAndOutputImpl<ASTExistsViewQueryIDAndQueryNames>;
+using ASTExistsStreamQuery = ASTQueryWithTableAndOutputImpl<ASTExistsStreamQueryIDAndQueryNames>;
 using ASTExistsDictionaryQuery = ASTQueryWithTableAndOutputImpl<ASTExistsDictionaryQueryIDAndQueryNames>;
 using ASTShowCreateTableQuery = ASTQueryWithTableAndOutputImpl<ASTShowCreateTableQueryIDAndQueryNames>;
 using ASTShowCreateViewQuery = ASTQueryWithTableAndOutputImpl<ASTShowCreateViewQueryIDAndQueryNames>;
+using ASTShowCreateStreamQuery = ASTQueryWithTableAndOutputImpl<ASTShowCreateStreamQueryIDAndQueryNames>;
 using ASTShowCreateDictionaryQuery = ASTQueryWithTableAndOutputImpl<ASTShowCreateDictionaryQueryIDAndQueryNames>;
 
 class ASTExistsDatabaseQuery : public ASTQueryWithTableAndOutputImpl<ASTExistsDatabaseQueryIDAndQueryNames>

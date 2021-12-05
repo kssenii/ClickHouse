@@ -90,6 +90,7 @@ namespace ErrorCodes
     extern const int UNKNOWN_DATABASE;
     extern const int PATH_ACCESS_DENIED;
     extern const int NOT_IMPLEMENTED;
+    extern const int QUERY_NOT_ALLOWED;
 }
 
 namespace fs = std::filesystem;
@@ -721,7 +722,7 @@ void InterpreterCreateQuery::setEngine(ASTCreateQuery & create) const
     if (create.as_table_function)
         return;
 
-    if (create.storage || create.is_dictionary || create.isView())
+    if (create.storage || create.is_dictionary || create.isView() || create.is_stream)
     {
         if (create.temporary && create.storage && create.storage->engine && create.storage->engine->name != "Memory")
             throw Exception(
@@ -765,6 +766,11 @@ void InterpreterCreateQuery::setEngine(ASTCreateQuery & create) const
         if (as_create.is_window_view)
             throw Exception(
                 "Cannot CREATE a table AS " + qualified_name + ", it is a Window View",
+                ErrorCodes::INCORRECT_QUERY);
+
+        if (as_create.is_stream)
+            throw Exception(
+                "Cannot CREATE a table AS " + qualified_name + ", it is a Stream",
                 ErrorCodes::INCORRECT_QUERY);
 
         if (as_create.is_dictionary)
@@ -936,7 +942,7 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
     if (create.to_table_id && create.to_table_id.database_name.empty())
         create.to_table_id.database_name = current_database;
 
-    if (create.select && create.isView())
+    if (create.select && (create.isView() || create.is_stream))
     {
         // Expand CTE before filling default database
         ApplyWithSubqueryVisitor().visit(*create.select);
@@ -1248,8 +1254,9 @@ BlockIO InterpreterCreateQuery::doCreateOrReplaceTable(ASTCreateQuery & create,
 BlockIO InterpreterCreateQuery::fillTableIfNeeded(const ASTCreateQuery & create)
 {
     /// If the query is a CREATE SELECT, insert the data into the table.
-    if (create.select && !create.attach
-        && !create.is_ordinary_view && !create.is_live_view && !create.is_window_view && (!create.is_materialized_view || create.is_populate))
+    if (create.select && !create.attach && !create.is_ordinary_view
+        && !create.is_live_view && !create.is_window_view && !create.is_stream
+        && (!create.is_materialized_view || create.is_populate))
     {
         auto insert = std::make_shared<ASTInsertQuery>();
         insert->table_id = {create.getDatabase(), create.getTable(), create.uuid};
@@ -1330,6 +1337,8 @@ BlockIO InterpreterCreateQuery::execute()
     /// CREATE|ATTACH DATABASE
     if (create.database && !create.table)
         return createDatabase(create);
+    else if (create.is_subscription)
+        return createSubscription(create);
     else
         return createTable(create);
 }
@@ -1359,6 +1368,10 @@ AccessRightsElements InterpreterCreateQuery::getRequiredAccess() const
             required_access.emplace_back(AccessType::DROP_VIEW | AccessType::CREATE_VIEW, create.getDatabase(), create.getTable());
         else
             required_access.emplace_back(AccessType::CREATE_VIEW, create.getDatabase(), create.getTable());
+    }
+    else if (create.is_subscription)
+    {
+        required_access.emplace_back(AccessType::CREATE_SUBSCRIPTION, create.getDatabase(), create.getTable());
     }
     else
     {
@@ -1394,6 +1407,30 @@ void InterpreterCreateQuery::extendQueryLogElemImpl(QueryLogElement & elem, cons
         elem.query_databases.insert(database);
         elem.query_tables.insert(database + "." + backQuoteIfNeed(as_table_saved));
     }
+}
+
+BlockIO InterpreterCreateQuery::createSubscription(ASTCreateQuery & create)
+{
+    if (create == create.to_table_id)
+        throw Exception(ErrorCodes::QUERY_NOT_ALLOWED, "Cannot subscribe table to itself");
+
+    getContext()->checkAccess(getRequiredAccess());
+
+    String current_database = getContext()->getCurrentDatabase();
+    if (!create.database)
+        create.setDatabase(current_database);
+    if (create.to_table_id.database_name.empty())
+        create.to_table_id.database_name = current_database;
+
+    auto guard_to = DatabaseCatalog::instance().getDDLGuard(create.to_table_id.database_name, create.to_table_id.table_name);
+    auto storage_to = DatabaseCatalog::instance().getTable(create.to_table_id, getContext()); /// subscribee
+
+    auto from_table_id = StorageID(create);
+    auto storage_from = DatabaseCatalog::instance().getTable(from_table_id, getContext()); /// subscriber
+    auto lock_from = storage_from->lockForShare(getContext()->getCurrentQueryId(), getContext()->getSettingsRef().lock_acquire_timeout);
+
+    storage_to->subscribe(from_table_id, create.if_not_exists);
+    return {};
 }
 
 }

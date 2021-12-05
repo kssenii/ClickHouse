@@ -124,7 +124,7 @@ String getObjectDefinitionFromCreateQuery(const ASTPtr & query)
     create->create_or_replace = false;
 
     /// For views it is necessary to save the SELECT query itself, for the rest - on the contrary
-    if (!create->isView())
+    if (!create->isView() && !create->is_stream)
         create->select = nullptr;
 
     create->format = nullptr;

@@ -27,6 +27,8 @@ String ASTDropQuery::getID(char delim) const
 ASTPtr ASTDropQuery::clone() const
 {
     auto res = std::make_shared<ASTDropQuery>(*this);
+    res->subscription_from = subscription_from->clone();
+    res->subscription_to = subscription_to->clone();
     cloneOutputOptions(*res);
     cloneTableOptions(*res);
     return res;
@@ -54,6 +56,8 @@ void ASTDropQuery::formatQueryImpl(const FormatSettings & settings, FormatState 
         settings.ostr << "DICTIONARY ";
     else if (is_view)
         settings.ostr << "VIEW ";
+    else if (is_stream)
+        settings.ostr << "STREAM ";
     else
         settings.ostr << "TABLE ";
 

@@ -9,6 +9,7 @@
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Storages/LiveView/StorageLiveView.h>
 #include <Storages/WindowView/StorageWindowView.h>
+#include <Storages/StorageStream.h>
 #include <Storages/MergeTree/ReplicatedMergeTreeSink.h>
 #include <Storages/StorageMaterializedView.h>
 #include <Storages/StorageValues.h>
@@ -118,6 +119,20 @@ private:
     ContextPtr context;
 };
 
+/// Insert into Stream.
+class PushingToStreamSink final : public SinkToStorage
+{
+public:
+    PushingToStreamSink(const Block & header, StorageStream & stream_, StoragePtr storage_holder_, ContextPtr context_);
+    String getName() const override { return "PushingToStreamSink"; }
+    void consume(Chunk chunk) override;
+
+private:
+    StorageStream & stream;
+    StoragePtr storage_holder;
+    ContextPtr context;
+};
+
 /// For every view, collect exception.
 /// Has single output with empty header.
 /// If any exception happen before view processing, pass it.
@@ -206,6 +221,9 @@ Chain buildPushingToViewsChain(
 
     std::vector<Chain> chains;
 
+    std::cerr << "current table id: " << table_id.getNameForLogs() << "\n";
+    std::cerr << "dependences: " << dependencies.size() << "\n";
+
     for (const auto & database_table : dependencies)
     {
         auto dependent_table = DatabaseCatalog::instance().getTable(database_table, context);
@@ -293,6 +311,15 @@ Chain buildPushingToViewsChain(
             out = buildPushingToViewsChain(
                 dependent_table, dependent_metadata_snapshot, insert_context, ASTPtr(), true, view_thread_status, view_counter_ms, storage_header);
         }
+        else if (auto * stream = dynamic_cast<StorageStream *>(dependent_table.get()))
+        {
+            std::cerr << "kssenii ==================\n";
+            runtime_stats->type = QueryViewsLogElement::ViewType::STREAM;
+            query = stream->getInnerQuery(); // Used only to log in system.query_views_log
+            std::cerr << "storage header: " << storage_header.dumpStructure() << " and dependent: " << dependent_metadata_snapshot->getSampleBlock().dumpStructure() << "\n";
+            out = buildPushingToViewsChain(
+                dependent_table, dependent_metadata_snapshot, insert_context, ASTPtr(), true, view_thread_status, view_counter_ms, storage_header);
+        }
         else
             out = buildPushingToViewsChain(
                 dependent_table, dependent_metadata_snapshot, insert_context, ASTPtr(), false, view_thread_status, view_counter_ms);
@@ -373,6 +400,13 @@ Chain buildPushingToViewsChain(
         sink->setRuntimeData(thread_status, elapsed_counter_ms);
         result_chain.addSource(std::move(sink));
     }
+    else if (auto * stream = dynamic_cast<StorageStream *>(storage.get()))
+    {
+        std::cerr << "\nlive view header: " << live_view_header.dumpStructure() << "\n";
+        auto sink = std::make_shared<PushingToStreamSink>(live_view_header, *stream, storage, context);
+        sink->setRuntimeData(thread_status, elapsed_counter_ms);
+        result_chain.addSource(std::move(sink));
+    }
     /// Do not push to destination table if the flag is set
     else if (!no_destination)
     {
@@ -386,6 +420,7 @@ Chain buildPushingToViewsChain(
     if (result_chain.empty())
         result_chain.addSink(std::make_shared<NullSinkToStorage>(storage_header));
 
+    std::cerr << "result chanin: " << result_chain.getInputHeader() << " and " << result_chain.getOutputHeader() << "\n";
     return result_chain;
 }
 
@@ -589,6 +624,25 @@ void PushingToWindowViewSink::consume(Chunk chunk)
     Progress local_progress(chunk.getNumRows(), chunk.bytes(), 0);
     StorageWindowView::writeIntoWindowView(
         window_view, getHeader().cloneWithColumns(chunk.detachColumns()), context);
+    CurrentThread::updateProgressIn(local_progress);
+}
+
+
+PushingToStreamSink::PushingToStreamSink(
+    const Block & header, StorageStream & stream_,
+    StoragePtr storage_holder_, ContextPtr context_)
+    : SinkToStorage(header)
+    , stream(stream_)
+    , storage_holder(std::move(storage_holder_))
+    , context(std::move(context_))
+{
+}
+
+void PushingToStreamSink::consume(Chunk chunk)
+{
+    Progress local_progress(chunk.getNumRows(), chunk.bytes(), 0);
+    StorageStream::writeIntoStream(
+        stream, getHeader().cloneWithColumns(chunk.detachColumns()), context);
     CurrentThread::updateProgressIn(local_progress);
 }
 

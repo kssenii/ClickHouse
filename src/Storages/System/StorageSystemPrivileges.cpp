@@ -28,6 +28,8 @@ namespace
         DICTIONARY,
         VIEW,
         COLUMN,
+        SUBSCRIPTION,
+        STREAM,
     };
 
     DataTypeEnum8::Values getLevelEnumValues()
@@ -39,6 +41,7 @@ namespace
         enum_values.emplace_back("DICTIONARY", static_cast<Int8>(DICTIONARY));
         enum_values.emplace_back("VIEW", static_cast<Int8>(VIEW));
         enum_values.emplace_back("COLUMN", static_cast<Int8>(COLUMN));
+        enum_values.emplace_back("SUBSCRIPTION", static_cast<Int8>(SUBSCRIPTION));
         return enum_values;
     }
 }
