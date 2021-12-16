@@ -21,6 +21,8 @@ namespace ProfileEvents
     extern const Event RemoteFSUnusedPrefetches;
     extern const Event RemoteFSPrefetchedReads;
     extern const Event RemoteFSUnprefetchedReads;
+    extern const Event RemoteFSLazySeeks;
+    extern const Event RemoteFSSeeksWithReset;
     extern const Event RemoteFSBuffers;
 }
 
@@ -152,12 +154,17 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
         CurrentMetrics::Increment metric_increment{CurrentMetrics::AsynchronousReadWait};
         Stopwatch watch;
         {
-            size = prefetch_future.get();
+            size_t offset;
+            std::tie(size, offset) = prefetch_future.get();
+            assert(offset < working_buffer.size());
             if (size)
             {
                 memory.swap(prefetch_buffer);
                 set(memory.data(), memory.size());
                 working_buffer.resize(size);
+                if (offset)
+                    pos = working_buffer.begin() + offset;
+                size = available();
                 file_offset_of_buffer_end += size;
             }
         }
@@ -168,15 +175,23 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
     else
     {
         ProfileEvents::increment(ProfileEvents::RemoteFSUnprefetchedReads);
-        size = readInto(memory.data(), memory.size()).get();
+        size_t offset;
+        std::tie(size, offset) = readInto(memory.data(), memory.size()).get();
+        assert(offset < working_buffer.size());
 
         if (size)
         {
             set(memory.data(), memory.size());
             working_buffer.resize(size);
+            if (offset)
+                pos = working_buffer.begin() + offset;
+            size = available();
             file_offset_of_buffer_end += size;
         }
     }
+
+    if (file_offset_of_buffer_end != impl->getPos())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Expected equality {} == {}. It's a bug", file_offset_of_buffer_end, impl->getPos());
 
     prefetch_future = {};
     return size;
@@ -185,7 +200,11 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
 
 off_t AsynchronousReadIndirectBufferFromRemoteFS::seek(off_t offset_, int whence)
 {
+    if (bytes_to_ignore)
+        std::terminate();
+
     ProfileEvents::increment(ProfileEvents::RemoteFSSeeks);
+    off_t file_offset_before_seek = file_offset_of_buffer_end;
 
     if (whence == SEEK_CUR)
     {
@@ -231,18 +250,20 @@ off_t AsynchronousReadIndirectBufferFromRemoteFS::seek(off_t offset_, int whence
 
     pos = working_buffer.end();
 
-    /// Note: we read in range [file_offset_of_buffer_end, read_until_position).
+    /**
+    * Lazy ignore. Save number of bytes to ignore and ignore it either for prefetch buffer or current buffer.
+    * Note: we read in range [file_offset_of_buffer_end, read_until_position).
+    */
     if (read_until_position && file_offset_of_buffer_end < *read_until_position
-        && static_cast<off_t>(file_offset_of_buffer_end) >= getPosition()
-        && static_cast<off_t>(file_offset_of_buffer_end) < getPosition() + static_cast<off_t>(min_bytes_for_seek))
+        && static_cast<off_t>(file_offset_of_buffer_end) > file_offset_before_seek
+        && static_cast<off_t>(file_offset_of_buffer_end) < file_offset_before_seek + static_cast<off_t>(min_bytes_for_seek))
     {
-       /**
-        * Lazy ignore. Save number of bytes to ignore and ignore it either for prefetch buffer or current buffer.
-        */
-        bytes_to_ignore = file_offset_of_buffer_end - getPosition();
+        ProfileEvents::increment(ProfileEvents::RemoteFSLazySeeks);
+        bytes_to_ignore = file_offset_of_buffer_end - file_offset_before_seek;
     }
     else
     {
+        ProfileEvents::increment(ProfileEvents::RemoteFSSeeksWithReset);
         impl->reset();
     }
 

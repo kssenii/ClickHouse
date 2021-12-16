@@ -52,7 +52,7 @@ ReadBufferFromRemoteFSGather::ReadBufferFromRemoteFSGather(const RemoteMetadata 
 }
 
 
-size_t ReadBufferFromRemoteFSGather::readInto(char * data, size_t size, size_t offset, size_t ignore)
+std::pair<size_t, size_t> ReadBufferFromRemoteFSGather::readInto(char * data, size_t size, size_t offset, size_t ignore)
 {
     /**
      * Set `data` to current working and internal buffers.
@@ -64,12 +64,11 @@ size_t ReadBufferFromRemoteFSGather::readInto(char * data, size_t size, size_t o
     bytes_to_ignore = ignore;
 
     auto result = nextImpl();
-    bytes_to_ignore = 0;
 
     if (result)
-        return working_buffer.size();
+        return {working_buffer.size(), BufferBase::offset()};
 
-    return 0;
+    return {0, 0};
 }
 
 
@@ -142,14 +141,24 @@ bool ReadBufferFromRemoteFSGather::readImpl()
      * we save how many bytes need to be ignored (new_offset - position() bytes).
      */
     if (bytes_to_ignore)
+    {
         current_buf->ignore(bytes_to_ignore);
+        bytes_to_ignore = 0;
+    }
 
-    auto result = current_buf->next();
+    bool result = current_buf->hasPendingData();
+    if (result)
+    {
+        absolute_position += current_buf->available();
+    }
+    else
+    {
+        result = current_buf->next();
+        if (result)
+            absolute_position += current_buf->buffer().size();
+    }
 
     swap(*current_buf);
-
-    if (result)
-        absolute_position += working_buffer.size();
 
     return result;
 }
@@ -166,7 +175,6 @@ void ReadBufferFromRemoteFSGather::reset()
 {
     current_buf.reset();
 }
-
 
 String ReadBufferFromRemoteFSGather::getFileName() const
 {

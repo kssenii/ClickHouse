@@ -36,9 +36,11 @@ public:
 
     void setReadUntilPosition(size_t position) override;
 
-    size_t readInto(char * data, size_t size, size_t offset, size_t ignore = 0);
+    std::pair<size_t, size_t> readInto(char * data, size_t size, size_t offset, size_t ignore = 0);
 
     size_t getFileSize() const;
+
+    size_t getPos() const { return absolute_position; }
 
 protected:
     virtual SeekableReadBufferPtr createImplementationBuffer(const String & path, size_t read_until_position) const = 0;
