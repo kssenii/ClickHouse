@@ -31,6 +31,7 @@ struct QueryViewsLogElement
         MATERIALIZED = 2,
         LIVE = 3,
         WINDOW = 4,
+        STREAM = 5,
     };
 
     struct ViewRuntimeStats

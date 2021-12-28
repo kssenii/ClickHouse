@@ -67,9 +67,15 @@ void StorageMongoDB::connectIfNotConnected()
     if (!authenticated)
     {
 #       if POCO_VERSION >= 0x01070800
-            Poco::MongoDB::Database poco_db(database_name);
-            if (!poco_db.authenticate(*connection, username, password, Poco::MongoDB::Database::AUTH_SCRAM_SHA1))
-                throw Exception("Cannot authenticate in MongoDB, incorrect user or password", ErrorCodes::MONGODB_CANNOT_AUTHENTICATE);
+            if (username.empty() || password.empty())
+            {
+            }
+            else
+            {
+                Poco::MongoDB::Database poco_db(database_name);
+                if (!poco_db.authenticate(*connection, username, password, Poco::MongoDB::Database::AUTH_SCRAM_SHA1))
+                    throw Exception("Cannot authenticate in MongoDB, incorrect user or password", ErrorCodes::MONGODB_CANNOT_AUTHENTICATE);
+            }
 #       else
             authenticate(*connection, database_name, username, password);
 #       endif

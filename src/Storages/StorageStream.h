@@ -26,7 +26,9 @@ public:
 
     ASTPtr getInnerQuery() const { return inner_query; }
 
-    static void writeIntoStream(StorageStream & stream, const Block & block, ContextPtr context);
+    void writeIntoStream(const Block & block, ContextPtr context);
+
+    void writeIntoStorage(const StorageID & target_storage_id, Pipe pipe, ContextPtr local_context);
 
 protected:
     StorageStream(
@@ -37,6 +39,15 @@ protected:
         bool attach_);
 
 private:
+    enum class FlushStrategy
+    {
+        DEFAULT, /// Just flush each new block at once
+        INNER_QUERY_RESULT_UPDATE, /// same as live view, flush when result of the query changes.
+        TIME_WINDOW, /// same as window view.
+    };
+
+    FlushStrategy strategy = FlushStrategy::DEFAULT;
+
     Subscriptions subscriptions;
     mutable std::mutex subscriptions_mutex;
 

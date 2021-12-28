@@ -221,8 +221,6 @@ Chain buildPushingToViewsChain(
 
     std::vector<Chain> chains;
 
-    std::cerr << "current table id: " << table_id.getNameForLogs() << "\n";
-    std::cerr << "dependences: " << dependencies.size() << "\n";
 
     for (const auto & database_table : dependencies)
     {
@@ -420,7 +418,6 @@ Chain buildPushingToViewsChain(
     if (result_chain.empty())
         result_chain.addSink(std::make_shared<NullSinkToStorage>(storage_header));
 
-    std::cerr << "result chanin: " << result_chain.getInputHeader() << " and " << result_chain.getOutputHeader() << "\n";
     return result_chain;
 }
 
@@ -641,8 +638,7 @@ PushingToStreamSink::PushingToStreamSink(
 void PushingToStreamSink::consume(Chunk chunk)
 {
     Progress local_progress(chunk.getNumRows(), chunk.bytes(), 0);
-    StorageStream::writeIntoStream(
-        stream, getHeader().cloneWithColumns(chunk.detachColumns()), context);
+    stream.writeIntoStream(getHeader().cloneWithColumns(chunk.detachColumns()), context);
     CurrentThread::updateProgressIn(local_progress);
 }
 

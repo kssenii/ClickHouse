@@ -200,12 +200,14 @@ Chain InterpreterInsertQuery::buildChainImpl(
     ///       Otherwise we'll get duplicates when MV reads same rows again from Kafka.
     if (table->noPushingToViews() && !no_destination)
     {
+        std::cerr << "kssenii 2\n";
         auto sink = table->write(query_ptr, metadata_snapshot, context_ptr);
         sink->setRuntimeData(thread_status, elapsed_counter_ms);
         out.addSource(std::move(sink));
     }
     else
     {
+        std::cerr << "kssenii 1\n";
         out = buildPushingToViewsChain(table, metadata_snapshot, context_ptr, query_ptr, no_destination, thread_status, elapsed_counter_ms);
     }
 
@@ -225,6 +227,8 @@ Chain InterpreterInsertQuery::buildChainImpl(
 
     auto adding_missing_defaults_actions = std::make_shared<ExpressionActions>(adding_missing_defaults_dag);
 
+    std::cerr << "\nOUT: " << out.getInputHeader() << " and " << out.getOutputHeader() << "\n";
+    std::cerr << "query sample block: " << query_sample_block << "\n";
     /// Actually we don't know structure of input blocks from query/table,
     /// because some clients break insertion protocol (columns != header)
     out.addSource(std::make_shared<ConvertingTransform>(query_sample_block, adding_missing_defaults_actions));

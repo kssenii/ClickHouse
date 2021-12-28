@@ -1112,7 +1112,8 @@ void StorageWindowView::eventTimeParser(const ASTCreateQuery & query)
 void StorageWindowView::writeIntoWindowView(
     StorageWindowView & window_view, const Block & block, ContextPtr local_context)
 {
-    Pipe pipe(std::make_shared<SourceFromSingleChunk>(block.cloneEmpty(), Chunk(block.getColumns(), block.rows())));
+    Pipe pipe(std::make_shared<SourceFromSingleChunk>(block));
+    std::cerr << "\n\n\nkssenii pipe header initialy: " << pipe.getHeader().dumpStructure() << "\n";
 
     UInt32 lateness_bound = 0;
     UInt32 t_max_watermark = 0;

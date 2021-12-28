@@ -145,12 +145,8 @@ Pipes StorageLiveView::blocksToPipes(BlocksPtrs blocks, Block & sample_block)
 }
 
 /// Complete query using input streams from mergeable blocks
-QueryPipelineBuilder StorageLiveView::completeQuery(Pipes pipes)
+QueryPipelineBuilder StorageLiveView::completeQuery(Pipes pipes, ContextMutablePtr block_context)
 {
-    //FIXME it's dangerous to create Context on stack
-    auto block_context = Context::createCopy(getContext());
-    block_context->makeQueryContext();
-
     auto creator = [&](const StorageID & blocks_id_global)
     {
         auto parent_table_metadata = getParentStorage()->getInMemoryMetadataPtr();
@@ -226,6 +222,7 @@ void StorageLiveView::writeIntoLiveView(
 
         Pipes pipes;
         pipes.emplace_back(std::make_shared<SourceFromSingleChunk>(block));
+        std::cerr << "\n\n\n\nkssenii block: " << block.dumpStructure() << "\n";
 
         auto creator = [&](const StorageID & blocks_id_global)
         {
@@ -238,8 +235,10 @@ void StorageLiveView::writeIntoLiveView(
 
         InterpreterSelectQuery select_block(mergeable_query, local_context, blocks_storage.getTable(), blocks_storage.getTable()->getInMemoryMetadataPtr(),
             QueryProcessingStage::WithMergeableState);
+        std::cerr << "\nkssenii query: " << mergeable_query->dumpTree() << "\n";
 
         auto builder = select_block.buildQueryPipeline();
+        std::cerr << "\nkssenii builder: " << builder.getHeader().dumpStructure() << "\n";
         builder.addSimpleTransform([&](const Block & cur_header)
         {
             return std::make_shared<MaterializingTransform>(cur_header);
@@ -264,7 +263,9 @@ void StorageLiveView::writeIntoLiveView(
         }
     }
 
-    auto pipeline = live_view.completeQuery(std::move(from));
+    auto block_context = Context::createCopy(local_context->getGlobalContext());
+    block_context->makeQueryContext();
+    auto pipeline = live_view.completeQuery(std::move(from), block_context);
     pipeline.addChain(Chain(std::move(output)));
     pipeline.setSinks([&](const Block & cur_header, Pipe::StreamType)
     {
@@ -384,7 +385,9 @@ bool StorageLiveView::getNewBlocks()
     /// inserted data to be duplicated
     auto new_mergeable_blocks = collectMergeableBlocks(live_view_context);
     Pipes from = blocksToPipes(new_mergeable_blocks->blocks, new_mergeable_blocks->sample_block);
-    auto builder = completeQuery(std::move(from));
+    auto block_context = Context::createCopy(getContext());
+    block_context->makeQueryContext();
+    auto builder = completeQuery(std::move(from), block_context);
     auto pipeline = QueryPipelineBuilder::getPipeline(std::move(builder));
 
     PullingAsyncPipelineExecutor executor(pipeline);

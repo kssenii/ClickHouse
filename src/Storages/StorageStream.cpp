@@ -2,6 +2,7 @@
 
 #include <Interpreters/Context.h>
 #include <Interpreters/InterpreterInsertQuery.h>
+#include <Interpreters/InterpreterSelectQuery.h>
 
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
@@ -11,6 +12,14 @@
 #include <Processors/Transforms/ExpressionTransform.h>
 #include <Processors/Executors/CompletedPipelineExecutor.h>
 
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
+#include <Processors/Transforms/ExpressionTransform.h>
+#include <Processors/Transforms/SquashingChunksTransform.h>
+#include <Processors/Transforms/MaterializingTransform.h>
+#include <Processors/Executors/PipelineExecutor.h>
+#include <Processors/Sinks/EmptySink.h>
+
+#include <Storages/LiveView/StorageBlocks.h>
 #include <Storages/StorageFactory.h>
 
 #include <base/logger_useful.h>
@@ -36,22 +45,21 @@ StorageStream::StorageStream(
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
 
-    std::cerr << "stream table id: " << table_id_.getNameForLogs() << "\n";
     if (!query.select)
         throw Exception(ErrorCodes::INCORRECT_QUERY, "SELECT query is not specified for {}", getName());
 
     if (query.select->list_of_selects->children.size() != 1)
         throw Exception(ErrorCodes::QUERY_NOT_ALLOWED, "UNION is not supported for {}", getName());
 
+    inner_query = query.select->list_of_selects->children.at(0);
     auto select = SelectQueryDescription::getSelectQueryFromASTForMatView(query.select->clone(), local_context);
     storage_metadata.setSelectQuery(select);
     setInMemoryMetadata(storage_metadata);
 
     if (!select.select_table_id.empty())
     {
-        std::cerr << "\n\nadding dependency: " << select.select_table_id.getNameForLogs() << "\n";
         select_table_id = select.select_table_id;
-        DatabaseCatalog::instance().addDependency(select_table_id, getStorageID());
+        DatabaseCatalog::instance().addDependency(select_table_id, table_id_);
     }
 
     if (attach_) {}
@@ -107,33 +115,60 @@ void registerStorageStream(StorageFactory & factory)
     });
 }
 
-void StorageStream::writeIntoStream(StorageStream & stream, const Block & block, ContextPtr local_context)
+void StorageStream::writeIntoStream(const Block & block, ContextPtr local_context)
 {
-    auto subscriptions = StorageStream::getSubscriptions(stream);
     for (const auto & subscription : subscriptions)
     {
-        Pipe pipe(std::make_shared<SourceFromSingleChunk>(block));
-        auto insert = std::make_shared<ASTInsertQuery>();
-        insert->table_id = subscription;
-        InterpreterInsertQuery interpreter(insert, local_context);
-        auto block_io = interpreter.execute();
-
-        auto convert_actions_dag = ActionsDAG::makeConvertingActions(
-            pipe.getHeader().getColumnsWithTypeAndName(),
-            block_io.pipeline.getHeader().getColumnsWithTypeAndName(),
-            ActionsDAG::MatchColumnsMode::Position);
-        auto actions = std::make_shared<ExpressionActions>(
-            convert_actions_dag,
-            ExpressionActionsSettings::fromContext(local_context, CompileExpressions::yes));
-        pipe.addSimpleTransform([&](const Block & stream_header)
+        switch (strategy)
         {
-            return std::make_shared<ExpressionTransform>(stream_header, actions);
-        });
-
-        block_io.pipeline.complete(std::move(pipe));
-        CompletedPipelineExecutor executor(block_io.pipeline);
-        executor.execute();
+            case FlushStrategy::DEFAULT:
+            {
+                Pipe pipe = Pipe(std::make_shared<SourceFromSingleChunk>(block));
+                writeIntoStorage(subscription, std::move(pipe), local_context);
+                break;
+            }
+            case FlushStrategy::INNER_QUERY_RESULT_UPDATE:
+            {
+                break;
+            }
+            case FlushStrategy::TIME_WINDOW:
+            {
+                break;
+            }
+        }
     }
+}
+
+void StorageStream::writeIntoStorage(
+    const StorageID & target_storage_id, Pipe pipe, ContextPtr local_context)
+{
+    auto query = inner_query->clone();
+    InterpreterSelectQuery select(query, local_context, std::move(pipe), QueryProcessingStage::Complete);
+    auto builder = select.buildQueryPipeline();
+    auto target_table = DatabaseCatalog::instance().getTable(target_storage_id, local_context);
+    auto result_header = target_table->getInMemoryMetadataPtr()->getSampleBlock();
+
+    auto convert_actions_dag = ActionsDAG::makeConvertingActions(
+        builder.getHeader().getColumnsWithTypeAndName(),
+        result_header.getColumnsWithTypeAndName(),
+        ActionsDAG::MatchColumnsMode::Position);
+    auto actions = std::make_shared<ExpressionActions>(
+        convert_actions_dag,
+        ExpressionActionsSettings::fromContext(local_context, CompileExpressions::yes));
+    builder.addSimpleTransform([&](const Block & stream_header)
+    {
+        return std::make_shared<ExpressionTransform>(stream_header, actions);
+    });
+
+    auto insert = std::make_shared<ASTInsertQuery>();
+    insert->table_id = target_storage_id;
+    InterpreterInsertQuery interpreter(insert, local_context);
+    auto block_io = interpreter.execute();
+
+    auto result = QueryPipelineBuilder::getPipe(std::move(builder));
+    block_io.pipeline.complete(std::move(result));
+    CompletedPipelineExecutor executor(block_io.pipeline);
+    executor.execute();
 }
 
 }

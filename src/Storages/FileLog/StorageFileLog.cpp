@@ -318,10 +318,8 @@ Pipe StorageFileLog::read(
         throw Exception(ErrorCodes::QUERY_NOT_ALLOWED, "Cannot read from StorageFileLog with attached materialized views");
 
     std::lock_guard<std::mutex> lock(file_infos_mutex);
-    if (running_streams)
-    {
-        throw Exception("Another select query is running on this table, need to wait it finish.", ErrorCodes::CANNOT_SELECT);
-    }
+    /// In case of concurrent select we can read the same records from file more than once.
+    /// Consider this as expected behaviour.
 
     updateFileInfos();
 
