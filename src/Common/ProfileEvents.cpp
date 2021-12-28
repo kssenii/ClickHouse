@@ -278,6 +278,15 @@
     M(AsynchronousReadWaitMicroseconds, "Time spent in waiting for asynchronous reads.") \
     \
     M(MainConfigLoads, "Number of times the main configuration was reloaded.") \
+    \
+    M(DiskCacheRequestsIn, "Requests to local cache for remote FS.") \
+    M(DiskCacheRequestsOut, "Requests from local cache for remote FS to remote FS.") \
+    M(DiskCacheBytesTotal, "Total bytes from local cache for remote FS.") \
+    M(DiskCacheBytesCached, "Bytes from local cache for remote FS.") \
+    M(DiskCacheBytesRemote, "Bytes not found in local cache for remote FS.") \
+    M(DiskCacheBytesRemoteSkipCache, "Bytes not looking in local cache for remote FS.") \
+
+>>>>>>> anton/s3_read_cache
 
 namespace ProfileEvents
 {

@@ -32,7 +32,7 @@ public:
         if (vector.empty())
         {
             vector.resize(initial_size);
-            set(reinterpret_cast<Position>(vector.data()), vector.size());
+            BufferBase::set(reinterpret_cast<Position>(vector.data()), vector.size());
         }
     }
 
@@ -45,7 +45,7 @@ public:
                                                 : ((old_size < vector.capacity()) ? vector.capacity()
                                                                                   : vector.capacity() * size_multiplier);
         vector.resize(size);
-        set(reinterpret_cast<Position>(vector.data() + old_size), (size - old_size) * sizeof(typename VectorType::value_type));
+        BufferBase::set(reinterpret_cast<Position>(vector.data() + old_size), (size - old_size) * sizeof(typename VectorType::value_type));
     }
 
     bool isFinished() const { return finalized; }
@@ -72,7 +72,7 @@ private:
             / sizeof(typename VectorType::value_type));
 
         /// Prevent further writes.
-        set(nullptr, 0);
+        BufferBase::set(nullptr, 0);
     }
 
     void nextImpl() override

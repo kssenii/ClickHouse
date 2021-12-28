@@ -226,13 +226,15 @@ std::unique_ptr<ReadBufferFromFileBase> DiskS3::readFile(const String & path, co
 
     auto s3_impl = std::make_unique<ReadBufferFromS3Gather>(
         path,
-        settings->client, bucket, metadata,
+        settings->client, settings->cache_ptr, bucket, metadata,
         settings->s3_max_single_read_retries, read_settings, threadpool_read);
 
     if (threadpool_read)
     {
         auto reader = getThreadPoolReader();
-        return std::make_unique<AsynchronousReadIndirectBufferFromRemoteFS>(reader, read_settings, std::move(s3_impl));
+        auto res = std::make_unique<AsynchronousReadIndirectBufferFromRemoteFS>(reader, read_settings, std::move(s3_impl));
+        res->setLocalCacheEnabled(!!settings->cache_ptr);
+        return res;
     }
     else
     {
@@ -381,6 +383,7 @@ int DiskS3::readSchemaVersion(const String & source_bucket, const String & sourc
     auto settings = current_settings.get();
     ReadBufferFromS3 buffer(
         settings->client,
+        nullptr,
         source_bucket,
         source_path + SCHEMA_VERSION_OBJECT,
         settings->s3_max_single_read_retries,
@@ -1046,7 +1049,7 @@ void DiskS3::onFreeze(const String & path)
 
 void DiskS3::applyNewSettings(const Poco::Util::AbstractConfiguration & config, ContextPtr context_, const String &, const DisksMap &)
 {
-    auto new_settings = settings_getter(config, "storage_configuration.disks." + name, context_);
+    auto new_settings = settings_getter(config, "storage_configuration.disks." + name, context_, current_settings.get()->cache_ptr);
 
     current_settings.set(std::move(new_settings));
 
@@ -1056,6 +1059,7 @@ void DiskS3::applyNewSettings(const Poco::Util::AbstractConfiguration & config, 
 
 DiskS3Settings::DiskS3Settings(
     const std::shared_ptr<Aws::S3::S3Client> & client_,
+    const std::shared_ptr<DiskCache> & cache_ptr_,
     size_t s3_max_single_read_retries_,
     size_t s3_min_upload_part_size_,
     size_t s3_max_single_part_upload_size_,
@@ -1065,6 +1069,7 @@ DiskS3Settings::DiskS3Settings(
     int list_object_keys_size_,
     int objects_chunk_size_to_delete_)
     : client(client_)
+    , cache_ptr(cache_ptr_)
     , s3_max_single_read_retries(s3_max_single_read_retries_)
     , s3_min_upload_part_size(s3_min_upload_part_size_)
     , s3_max_single_part_upload_size(s3_max_single_part_upload_size_)

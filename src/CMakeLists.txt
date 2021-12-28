@@ -104,6 +104,7 @@ endif()
 if (USE_AWS_S3)
     add_headers_and_sources(dbms Common/S3)
     add_headers_and_sources(dbms Disks/S3)
+    list (APPEND clickhouse_common_io_sources Disks/DiskCache.cpp)
 endif()
 
 if (USE_AZURE_BLOB_STORAGE)

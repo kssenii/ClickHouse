@@ -20,6 +20,8 @@ class S3Client;
 
 namespace DB
 {
+class DiskCache;
+
 /**
  * Perform S3 HTTP GET request and provide response to read.
  */
@@ -27,6 +29,7 @@ class ReadBufferFromS3 : public SeekableReadBufferWithSize
 {
 private:
     std::shared_ptr<Aws::S3::S3Client> client_ptr;
+    std::shared_ptr<DiskCache> disk_cache;
     String bucket;
     String key;
     UInt64 max_single_read_retries;
@@ -39,6 +42,7 @@ private:
 public:
     ReadBufferFromS3(
         std::shared_ptr<Aws::S3::S3Client> client_ptr_,
+        std::shared_ptr<DiskCache> disk_cache_,
         const String & bucket_,
         const String & key_,
         UInt64 max_single_read_retries_,

@@ -28,7 +28,7 @@ namespace DB
 #if USE_AWS_S3
 SeekableReadBufferPtr ReadBufferFromS3Gather::createImplementationBuffer(const String & path, size_t read_until_position_) const
 {
-    return std::make_unique<ReadBufferFromS3>(client_ptr, bucket,
+    return std::make_unique<ReadBufferFromS3>(client_ptr, cache_ptr, bucket,
         fs::path(metadata.remote_fs_root_path) / path, max_single_read_retries, settings, threadpool_read, read_until_position_);
 }
 #endif

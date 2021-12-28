@@ -83,6 +83,8 @@ private:
 
 
 #if USE_AWS_S3
+class DiskCache;
+
 /// Reads data from S3 using stored paths in metadata.
 class ReadBufferFromS3Gather final : public ReadBufferFromRemoteFSGather
 {
@@ -90,6 +92,7 @@ public:
     ReadBufferFromS3Gather(
         const String & path_,
         std::shared_ptr<Aws::S3::S3Client> client_ptr_,
+        std::shared_ptr<DiskCache> cache_ptr_,
         const String & bucket_,
         IDiskRemote::Metadata metadata_,
         size_t max_single_read_retries_,
@@ -97,6 +100,7 @@ public:
         bool threadpool_read_ = false)
         : ReadBufferFromRemoteFSGather(metadata_, path_)
         , client_ptr(std::move(client_ptr_))
+        , cache_ptr(std::move(cache_ptr_))
         , bucket(bucket_)
         , max_single_read_retries(max_single_read_retries_)
         , settings(settings_)
@@ -108,6 +112,7 @@ public:
 
 private:
     std::shared_ptr<Aws::S3::S3Client> client_ptr;
+    std::shared_ptr<DiskCache> cache_ptr;
     String bucket;
     UInt64 max_single_read_retries;
     ReadSettings settings;

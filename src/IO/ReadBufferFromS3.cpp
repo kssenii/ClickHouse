@@ -2,8 +2,10 @@
 
 #if USE_AWS_S3
 
+#include <Disks/DiskCache.h>
 #include <IO/ReadBufferFromIStream.h>
 #include <IO/ReadBufferFromS3.h>
+#include <IO/ReadSettings.h>
 #include <Common/Stopwatch.h>
 
 #include <aws/s3/S3Client.h>
@@ -37,6 +39,7 @@ namespace ErrorCodes
 
 ReadBufferFromS3::ReadBufferFromS3(
     std::shared_ptr<Aws::S3::S3Client> client_ptr_,
+    std::shared_ptr<DiskCache> disk_cache_,
     const String & bucket_,
     const String & key_,
     UInt64 max_single_read_retries_,
@@ -45,6 +48,7 @@ ReadBufferFromS3::ReadBufferFromS3(
     size_t read_until_position_)
     : SeekableReadBufferWithSize(nullptr, 0)
     , client_ptr(std::move(client_ptr_))
+    , disk_cache(std::move(disk_cache_))
     , bucket(bucket_)
     , key(key_)
     , max_single_read_retries(max_single_read_retries_)
@@ -137,13 +141,14 @@ bool ReadBufferFromS3::nextImpl()
             impl.reset();
         }
     }
-
     if (!next_result)
         return false;
 
     BufferBase::set(impl->buffer().begin(), impl->buffer().size(), impl->offset()); /// use the buffer returned by `impl`
 
-    ProfileEvents::increment(ProfileEvents::S3ReadBytes, working_buffer.size());
+    if (!disk_cache)
+        ProfileEvents::increment(ProfileEvents::S3ReadBytes, working_buffer.size());
+
     offset += working_buffer.size();
 
     return true;
@@ -219,40 +224,162 @@ off_t ReadBufferFromS3::getPosition()
     return offset - available();
 }
 
+struct Range
+{
+    size_t start = 0;
+    size_t end = 0;
+    size_t size = 0;
+
+    bool parse(const String & content_range)
+    {
+        // supported   '<unit> <start>-<end>/<size>'
+        // unsuppotred '<unit> <start>-<end>/*'
+        // unsuppurted '<unit> */<size>'
+        // unsupported unit except 'bytes'
+
+        if (content_range.size() < 11) /// 'bytes 1-2/3'
+            return false;
+        if (content_range.substr(0, 5) != "bytes")
+            return false;
+        auto pos = content_range.find_first_not_of(" \t", 5);
+        if (pos == std::string::npos || pos <= 5)
+            return false;
+        const auto * str = content_range.c_str();
+        char * str_end;
+        start = std::strtoull(str + pos, &str_end, 10);
+        if (*str_end != '-')
+            return false;
+        end = std::strtoull(str_end + 1, &str_end, 10);
+        if (*str_end != '/')
+            return false;
+        size = std::strtoull(str_end + 1, &str_end, 10);
+        if (content_range.find_first_not_of(" \t", str_end - str) != std::string::npos)
+            return false;
+
+        return (end >= start && size > end);
+    }
+};
+
+
+class ReadBufferFromS3Result : public ReadBufferFromIStream
+{
+public:
+    ReadBufferFromS3Result(std::unique_ptr<Aws::S3::Model::GetObjectResult> & read_result_, size_t size) :
+        ReadBufferFromIStream(read_result_->GetBody(), size),
+        read_result(std::move(read_result_))
+    {
+        LOG_TEST(&Poco::Logger::get("ReadBufferFromS3Result"), "Create stream. this {}, result {}", reinterpret_cast<size_t>(this), reinterpret_cast<size_t>(&*read_result));
+    }
+
+    ~ReadBufferFromS3Result() override
+    {
+        LOG_TEST(&Poco::Logger::get("ReadBufferFromS3Result"), "Destroy stream. this {}, result {}", reinterpret_cast<size_t>(this), reinterpret_cast<size_t>(&*read_result));
+    }
+
+private:
+    std::unique_ptr<Aws::S3::Model::GetObjectResult> read_result;
+};
+
+class DiskCacheDownloaderS3 : public DiskCacheDownloader
+{
+public:
+    DiskCacheDownloaderS3(std::shared_ptr<Aws::S3::S3Client> client_ptr_, const String & bucket_,
+        const String & key_, size_t buffer_size_) :
+        client_ptr(client_ptr_), bucket(bucket_), key(key_), buffer_size(buffer_size_)
+    {
+        log = &Poco::Logger::get("DiskCacheDownloaderS3");
+        LOG_TEST(log, "Create downloader. Bucket: {}, Key: {}, this: {}", bucket, key, reinterpret_cast<size_t>(this));
+    }
+
+    ~DiskCacheDownloaderS3() override
+    {
+        LOG_TEST(log, "Destroy downloader. Bucket: {}, Key: {}, this: {}", bucket, key, reinterpret_cast<size_t>(this));
+    }
+
+    RemoteFSStream get(size_t offset, size_t size) override
+    {
+        Aws::S3::Model::GetObjectRequest req;
+        req.SetBucket(bucket);
+        req.SetKey(key);
+
+        /**
+         * If remote_filesystem_read_method = 'read_threadpool', then for MergeTree family tables
+         * exact byte ranges to read are always passed here.
+         */
+        if (size)
+        {
+            req.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
+            LOG_TEST(log, "Read S3 object. Bucket: {}, Key: {}, Range: {}-{}, this: {}", bucket, key, offset, offset + size - 1, reinterpret_cast<size_t>(this));
+        }
+        else
+        {
+            req.SetRange(fmt::format("bytes={}-", offset));
+            LOG_TEST(log, "Read S3 object. Bucket: {}, Key: {}, Offset: {}, this: {}", bucket, key, offset, reinterpret_cast<size_t>(this));
+        }
+
+        Aws::S3::Model::GetObjectOutcome outcome = client_ptr->GetObject(req);
+
+        RemoteFSStream res;
+
+        if (!outcome.IsSuccess())
+        {
+            if (outcome.GetError().GetExceptionName() == "InvalidRange")
+            {   /// offset is out of available size
+                /// May be when offset is equal to file size
+                return res;
+            }
+            else
+                throw Exception(outcome.GetError().GetMessage(), ErrorCodes::S3_ERROR);
+        }
+
+        std::unique_ptr<Aws::S3::Model::GetObjectResult> read_result = std::make_unique<Aws::S3::Model::GetObjectResult>(outcome.GetResultWithOwnership());
+
+        String range_header = read_result->GetContentRange();
+        Range range;
+        if (!range.parse(range_header))
+        {
+            LOG_ERROR(log, "Can't parse range: {}", range_header);
+        }
+        else
+        {
+            res.expected_size = range.end - range.start + 1;
+            res.file_size = range.size;
+        }
+
+        res.stream = std::make_unique<ReadBufferFromS3Result>(read_result, buffer_size);
+        return res;
+    }
+
+    String getFilePath() const override
+    {
+        return bucket + "/" + key;
+    }
+
+private:
+    std::shared_ptr<Aws::S3::S3Client> client_ptr;
+    String bucket;
+    String key;
+    size_t buffer_size;
+    Poco::Logger * log;
+};
+
 std::unique_ptr<ReadBuffer> ReadBufferFromS3::initialize()
 {
-    Aws::S3::Model::GetObjectRequest req;
-    req.SetBucket(bucket);
-    req.SetKey(key);
-
-    /**
-     * If remote_filesystem_read_method = 'threadpool', then for MergeTree family tables
-     * exact byte ranges to read are always passed here.
-     */
     if (read_until_position)
     {
         if (offset >= read_until_position)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Attempt to read beyond right offset ({} > {})", offset, read_until_position - 1);
-
-        req.SetRange(fmt::format("bytes={}-{}", offset, read_until_position - 1));
-        LOG_TEST(log, "Read S3 object. Bucket: {}, Key: {}, Range: {}-{}", bucket, key, offset, read_until_position - 1);
     }
-    else
+
+    auto downloader = std::make_shared<DiskCacheDownloaderS3>(client_ptr, bucket, key, read_settings.remote_fs_buffer_size);
+
+    if (disk_cache)
     {
-        if (offset)
-            req.SetRange(fmt::format("bytes={}-", offset));
-        LOG_TEST(log, "Read S3 object. Bucket: {}, Key: {}, Offset: {}", bucket, key, offset);
+        String cache_key = bucket + "/" + key;
+        return disk_cache->find(cache_key, offset, read_until_position ? read_until_position - offset : 0, downloader);
     }
 
-    Aws::S3::Model::GetObjectOutcome outcome = client_ptr->GetObject(req);
-
-    if (outcome.IsSuccess())
-    {
-        read_result = outcome.GetResultWithOwnership();
-        return std::make_unique<ReadBufferFromIStream>(read_result.GetBody(), read_settings.remote_fs_buffer_size);
-    }
-    else
-        throw Exception(outcome.GetError().GetMessage(), ErrorCodes::S3_ERROR);
+    return downloader->get(offset, read_until_position ? read_until_position - offset : 0).stream;
 }
 
 }
