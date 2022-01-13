@@ -286,7 +286,6 @@
     M(DiskCacheBytesRemote, "Bytes not found in local cache for remote FS.") \
     M(DiskCacheBytesRemoteSkipCache, "Bytes not looking in local cache for remote FS.") \
 
->>>>>>> anton/s3_read_cache
 
 namespace ProfileEvents
 {

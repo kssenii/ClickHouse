@@ -233,8 +233,8 @@ std::unique_ptr<ReadBufferFromFileBase> DiskS3::readFile(const String & path, co
     {
         auto reader = getThreadPoolReader();
         auto res = std::make_unique<AsynchronousReadIndirectBufferFromRemoteFS>(reader, read_settings, std::move(s3_impl));
-        res->setLocalCacheEnabled(!!settings->cache_ptr);
-        return res;
+        res->setLocalCacheEnabled(settings->cache_ptr != nullptr);
+        return std::move(res);
     }
     else
     {

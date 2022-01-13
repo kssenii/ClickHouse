@@ -59,16 +59,12 @@ public:
     BufferBase(Position ptr, size_t size, size_t offset)
         : pos(ptr + offset), working_buffer(ptr, ptr + size), internal_buffer(ptr, ptr + size) {}
 
-    virtual ~BufferBase() = default;
-
-    virtual void set(Position ptr, size_t size, size_t offset)
+    void set(Position ptr, size_t size, size_t offset)
     {
         internal_buffer = Buffer(ptr, ptr + size);
         working_buffer = Buffer(ptr, ptr + size);
         pos = ptr + offset;
     }
-
-    virtual void set(Position ptr, size_t size) { set(ptr, size, 0); }
 
     /// get buffer
     inline Buffer & internalBuffer() { return internal_buffer; }

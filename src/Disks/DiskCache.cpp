@@ -5,6 +5,7 @@
 #include <Common/ProfileEvents.h>
 #include <IO/ReadBufferFromEmptyFile.h>
 #include <base/getThreadId.h>
+#include <IO/BufferHelpers.h>
 
 namespace ProfileEvents
 {
@@ -35,10 +36,9 @@ DiskCacheLRUPolicy::CacheInProgressEntry::CacheInProgressEntry(size_t size_) :
 }
 
 
-DiskCacheLRUPolicy::DiskCacheLRUPolicy(size_t cache_size_limit_, size_t nodes_limit_) :
-    cache_size_limit(cache_size_limit_), nodes_limit(nodes_limit_)
+DiskCacheLRUPolicy::DiskCacheLRUPolicy(size_t cache_max_size_, size_t cache_entries_max_num_) :
+    cache_size_limit(cache_max_size_), nodes_limit(cache_entries_max_num_)
 {
-    log = &Poco::Logger::get("DiskCacheLRUPolicy");
 }
 
 void DiskCacheLRUPolicy::complete(const String & key, size_t offset, FileDownloadStatus status)
@@ -64,7 +64,8 @@ void DiskCacheLRUPolicy::complete(const String & key, size_t offset, FileDownloa
     LOG_TRACE(log, "Complete {}, offset {}", key, offset);
 
     if (q->second->size > reserved_size)
-    { // Should never be here if code correct
+    {
+        // Should never be here if code correct
         q->second->status = FileDownloadStatus::ERROR;
         q->second->condition.notify_all();
         p->second.erase(q);
@@ -91,15 +92,16 @@ void DiskCacheLRUPolicy::error(const String & key, size_t offset)
     complete(key, offset, FileDownloadStatus::ERROR);
 }
 
-std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::add(const String & key, size_t file_size,
+DiskCachePolicy::CacheEntries DiskCacheLRUPolicy::add(const String & key, size_t file_size,
     size_t offset, size_t size, bool restore)
 {
     std::unique_lock<std::mutex> lock(cache_mutex);
 
-    std::list<std::pair<String, size_t>> res = reserve_unsafe(size, true);
+    CacheEntries res = reserveUnsafe(size, true);
 
     if (size > cache_size_limit)
-    { // Should never be here if code correct
+    {
+        // Should never be here if code correct
         if (!restore)
         {
             complete(key, offset, FileDownloadStatus::ERROR);
@@ -125,7 +127,7 @@ std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::add(const String & key,
                 key, offset, size, entry_before->second->offset, entry_before->second->size);
             if (restore)
             { /// incorrect cache on disk
-                res.push_back(std::make_pair(key, offset));
+                res.emplace_back(key, offset, 0);
                 return res;
             }
             else
@@ -142,7 +144,7 @@ std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::add(const String & key,
                 key, offset, size, entry_after->second->offset, entry_after->second->size);
             if (restore)
             { /// incorrect cache on disk
-                res.push_back(std::make_pair(key, offset));
+                res.emplace_back(key, offset, 0);
                 return res;
             }
             else
@@ -156,18 +158,21 @@ std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::add(const String & key,
     CacheEntry new_entry(key, offset, size);
     cache_list.push_front(new_entry);
     if (!cache_map[key].size) /// File size was unknown before
+    {
         cache_map[key].size = file_size;
+    }
     else if (cache_map[key].size != file_size)
     {
         /// File on remote FS was changed, invalidate old cache records here
         /// This should not be in normal situation. Someone else changed file.
         LOG_WARNING(log, "Key {} : size changed from {} to {}. Old records for key invalidated.", key, cache_map[key].size, file_size);
         for (auto & entry : cache_map[key].parts)
-            res.push_back(std::make_pair(key, entry.first));
-        cache_map[key].parts.clear();
+            res.emplace_back(key, entry.first, 0);
 
+        cache_map[key].parts.clear();
         cache_map[key].size = file_size;
     }
+
     cache_map[key].parts[offset] = cache_list.begin();
     cache_size += size;
 
@@ -179,9 +184,9 @@ std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::add(const String & key,
     return res;
 }
 
-DiskCachePolicy::CachePartList DiskCacheLRUPolicy::remove(const String & key)
+DiskCachePolicy::FileSegmentList DiskCacheLRUPolicy::remove(const String & key)
 {
-    CachePartList res;
+    FileSegmentList res;
 
     std::unique_lock<std::mutex> lock(cache_mutex);
 
@@ -190,7 +195,7 @@ DiskCachePolicy::CachePartList DiskCacheLRUPolicy::remove(const String & key)
     {
         for (auto & entry : p->second.parts)
         {
-            res.push_back(CachePart(entry.second->offset, entry.second->size));
+            res.push_back(FileSegment(entry.second->offset, entry.second->size));
             cache_size -= entry.second->size;
             cache_list.erase(entry.second);
         }
@@ -202,7 +207,7 @@ DiskCachePolicy::CachePartList DiskCacheLRUPolicy::remove(const String & key)
 
 void DiskCacheLRUPolicy::remove(const String & key, size_t offset, size_t)
 {
-    CachePartList res;
+    FileSegmentList res;
 
     std::unique_lock<std::mutex> lock(cache_mutex);
 
@@ -222,15 +227,15 @@ void DiskCacheLRUPolicy::remove(const String & key, size_t offset, size_t)
     }
 }
 
-std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::reserve(size_t size)
+DiskCachePolicy::CacheEntries DiskCacheLRUPolicy::reserve(size_t size)
 {
     std::unique_lock<std::mutex> lock(cache_mutex);
-    return reserve_unsafe(size);
+    return reserveUnsafe(size);
 }
 
-std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::reserve_unsafe(size_t size, bool free_only)
+DiskCachePolicy::CacheEntries DiskCacheLRUPolicy::reserveUnsafe(size_t size, bool free_only)
 {
-    std::list<std::pair<String, size_t>> keys_to_remove;
+    CacheEntries keys_to_remove;
 
     if (size + reserved_size > cache_size_limit)
     {
@@ -240,10 +245,12 @@ std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::reserve_unsafe(size_t s
 
     auto last = cache_list.end();
     LOG_TRACE(log, "Cache size before cleanup: {}", cache_size);
+
     while (cache_size > cache_size_limit - size || cache_map.size() >= nodes_limit)
     {
         if (last == cache_list.begin())
-        { // Should never be here if code correct
+        {
+            // Should never be here if code correct
             throw Exception("Non-zero cache size with empty cache list", ErrorCodes::LOGICAL_ERROR);
         }
 
@@ -254,7 +261,7 @@ std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::reserve_unsafe(size_t s
             throw Exception("Cache size less than one cache element", ErrorCodes::LOGICAL_ERROR);
         }
 
-        keys_to_remove.push_back(std::make_pair(last->key, last->offset));
+        keys_to_remove.push_back(*last);
         cache_map[last->key].parts.erase(last->offset);
         if (cache_map[last->key].parts.empty())
             cache_map.erase(last->key);
@@ -272,10 +279,10 @@ std::list<std::pair<String, size_t>> DiskCacheLRUPolicy::reserve_unsafe(size_t s
     return keys_to_remove;
 }
 
-DiskCachePolicy::CachePart DiskCacheLRUPolicy::find(const String & key, size_t offset, size_t size)
+DiskCachePolicy::FileSegment DiskCacheLRUPolicy::find(const String & key, size_t offset, size_t size)
 {
-    CachePart res(offset, size);
-    res.type = DiskCachePolicy::CachePart::CachePartType::ABSENT;
+    FileSegment res(offset, size);
+    res.type = DiskCachePolicy::FileSegment::FileSegmentType::ABSENT;
 
     uint64_t thread_id = getThreadId();
 
@@ -300,7 +307,7 @@ DiskCachePolicy::CachePart DiskCacheLRUPolicy::find(const String & key, size_t o
             if (p->second.size && offset >= p->second.size)
             {
                 LOG_TRACE(log, "Key {}, try get after file end, {} >= {}", key, res.offset, p->second.size);
-                res.type = DiskCachePolicy::CachePart::CachePartType::EMPTY;
+                res.type = DiskCachePolicy::FileSegment::FileSegmentType::EMPTY;
                 return res;
             }
 
@@ -310,7 +317,7 @@ DiskCachePolicy::CachePart DiskCacheLRUPolicy::find(const String & key, size_t o
             if (entry != parts.end() && entry->second->offset == offset)
             { // found cached part with same offset
                 res.size = entry->second->size;
-                res.type = DiskCachePolicy::CachePart::CachePartType::CACHED;
+                res.type = DiskCachePolicy::FileSegment::FileSegmentType::CACHED;
                 LOG_TRACE(log, "Key {} in cache, read {}+{}", key, res.offset, res.size);
             }
             else if (entry != parts.end() && entry == parts.begin())
@@ -326,7 +333,7 @@ DiskCachePolicy::CachePart DiskCacheLRUPolicy::find(const String & key, size_t o
                 { // found cached part with lower offset
                     res.offset = entry->second->offset;
                     res.size = entry->second->size;
-                    res.type = DiskCachePolicy::CachePart::CachePartType::CACHED;
+                    res.type = DiskCachePolicy::FileSegment::FileSegmentType::CACHED;
                     LOG_TRACE(log, "Key {} in cache, read {}+{}", key, res.offset, res.size);
                 }
                 else
@@ -343,7 +350,7 @@ DiskCachePolicy::CachePart DiskCacheLRUPolicy::find(const String & key, size_t o
             LOG_TRACE(log, "Key {} completely not in cache, download {}+{}", key, offset, size);
         }
 
-        if (res.type != DiskCachePolicy::CachePart::CachePartType::ABSENT)
+        if (res.type != DiskCachePolicy::FileSegment::FileSegmentType::ABSENT)
             break;
 
         ++retry;
@@ -382,7 +389,7 @@ DiskCachePolicy::CachePart DiskCacheLRUPolicy::find(const String & key, size_t o
                         { /// Workaround for avoiding deadlocks when current thread already downloading some object
                             /// TODO: this case needs optimization
                             LOG_TRACE(log, "Skip cache usage to avoid deadlock for key {}", key);
-                            res.type = DiskCachePolicy::CachePart::CachePartType::ABSENT_NO_CACHE;
+                            res.type = DiskCachePolicy::FileSegment::FileSegmentType::ABSENT_NO_CACHE;
                             return res;
                         }
 
@@ -416,13 +423,13 @@ DiskCachePolicy::CachePart DiskCacheLRUPolicy::find(const String & key, size_t o
             if (retry >= retries_max)
             {
                 LOG_WARNING(log, "Can't get stable cache info for {}", key);
-                res.type = DiskCachePolicy::CachePart::CachePartType::ABSENT_NO_CACHE;
+                res.type = DiskCachePolicy::FileSegment::FileSegmentType::ABSENT_NO_CACHE;
                 return res;
             }
         }
     }
 
-    if (res.type == DiskCachePolicy::CachePart::CachePartType::ABSENT)
+    if (res.type == DiskCachePolicy::FileSegment::FileSegmentType::ABSENT)
     {
         ++read_thread_ids[thread_id];
         cache_in_progress[key][offset] = std::make_shared<CacheInProgressEntry>(res.size);
@@ -526,7 +533,7 @@ private:
         auto to_remove = cache_policy->add(cache_key, cache_file_size, part_offset, cache_part_size, false);
         for (auto & entry_to_remove : to_remove)
         {
-            String remove_cache_path = DiskCache::getCacheBasePath(entry_to_remove.first) + "_" + std::to_string(entry_to_remove.second);
+            String remove_cache_path = DiskCache::getCacheBasePath(entry_to_remove.key) + "_" + std::to_string(entry_to_remove.offset);
             LOG_TRACE(log, "Remove cached file {}", remove_cache_path);
             cache_disk->removeFileIfExists(remove_cache_path);
         }
@@ -561,64 +568,55 @@ private:
 class CacheableMultipartReadBuffer : public ReadBuffer
 {
 public:
-    CacheableMultipartReadBuffer(std::shared_ptr<DiskLocal> cache_disk_, std::shared_ptr<DiskCachePolicy> cache_policy_,
-        const String & cache_key_, const String & cache_base_path_,
-        size_t offset_, size_t size_,
-        std::shared_ptr<DiskCacheDownloader> downloader_) :
-        ReadBuffer(nullptr, 0), cache_disk(std::move(cache_disk_)),
-        cache_policy(std::move(cache_policy_)), cache_key(cache_key_), cache_base_path(cache_base_path_),
-        current_offset(offset_), end_offset(size_ ? offset_ + size_ : size_),
-        downloader(std::move(downloader_))
+    CacheableMultipartReadBuffer(
+        std::shared_ptr<DiskLocal> cache_disk_,
+        std::shared_ptr<DiskCachePolicy> cache_policy_,
+        const String & cache_key_,
+        const String & cache_base_path_,
+        size_t offset_,
+        size_t size_,
+        std::shared_ptr<DiskCacheDownloader> downloader_)
+        : ReadBuffer(nullptr, 0)
+        , cache_disk(std::move(cache_disk_))
+        , cache_policy(std::move(cache_policy_))
+        , cache_key(cache_key_)
+        , cache_base_path(cache_base_path_)
+        , current_offset(offset_)
+        , right_offset(offset_ + size_)
+        , downloader(std::move(downloader_))
     {
         ProfileEvents::increment(ProfileEvents::DiskCacheRequestsIn, 1);
-        log = &Poco::Logger::get("CacheableMultipartReadBuffer");
     }
 
-    void set(BufferBase::Position ptr, size_t size, size_t offset) override
-    {
-        use_external_buffer = true;
-        BufferBase::set(ptr, size, offset);
-    }
+    // void set(BufferBase::Position ptr, size_t size, size_t offset) override
+    // {
+    //     use_external_buffer = true;
+    //     BufferBase::set(ptr, size, offset);
+    // }
 
-    void set(BufferBase::Position ptr, size_t size) override
-    {
-        use_external_buffer = true;
-        BufferBase::set(ptr, size);
-    }
+    // void set(BufferBase::Position ptr, size_t size) override
+    // {
+    //     use_external_buffer = true;
+    //     BufferBase::set(ptr, size);
+    // }
 
 private:
-    class SwapHelper
-    {
-    public:
-        SwapHelper(BufferBase & buffer1_, BufferBase & buffer2_)
-            : buffer1(buffer1_), buffer2(buffer2_)
-        {
-            buffer1.swap(buffer2);
-        }
-        ~SwapHelper()
-        {
-            buffer1.swap(buffer2);
-        }
-    private:
-        BufferBase & buffer1;
-        BufferBase & buffer2;
-    };
 
     bool nextImpl() override
     {
         bool res = false;
         if (from)
         {
-            SwapHelper sh(*this, *from);
+            BufferSwapHelper swap(*this, *from);
             res = from->next();
         }
         if (!res)
         {
-            from.reset(nullptr);
+            from.reset();
             ensureFrom();
             if (from)
             {
-                SwapHelper sh(*this, *from);
+                BufferSwapHelper swap(*this, *from);
                 res = from->next();
             }
         }
@@ -631,14 +629,14 @@ private:
 
             switch (current_type)
             {
-                case DiskCachePolicy::CachePart::CachePartType::CACHED:
+                case DiskCachePolicy::FileSegment::FileSegmentType::CACHED:
                     ProfileEvents::increment(ProfileEvents::DiskCacheBytesCached, size);
                     break;
-                case DiskCachePolicy::CachePart::CachePartType::ABSENT:
+                case DiskCachePolicy::FileSegment::FileSegmentType::ABSENT:
                     ProfileEvents::increment(ProfileEvents::DiskCacheBytesRemote, size);
                     ProfileEvents::increment(ProfileEvents::S3ReadBytes, size);
                     break;
-                case DiskCachePolicy::CachePart::CachePartType::ABSENT_NO_CACHE:
+                case DiskCachePolicy::FileSegment::FileSegmentType::ABSENT_NO_CACHE:
                     ProfileEvents::increment(ProfileEvents::DiskCacheBytesRemote, size);
                     ProfileEvents::increment(ProfileEvents::DiskCacheBytesRemoteSkipCache, size);
                     ProfileEvents::increment(ProfileEvents::S3ReadBytes, size);
@@ -651,70 +649,53 @@ private:
         return res;
     }
 
-    void ensureFrom()
+    std::optional<DiskCachePolicy::FileSegment> getNextCacheSegment(const String & key, size_t offset)
     {
-        int retries = 3;
+    }
 
-        while (!from)
+    /// TODO: Should we add retries meaning: we tried to wait for file segment to be downloaded,
+    /// but too much time passed waiting, so let's download ourselves.
+    std::unique_ptr<SeekableReadBuffer> getNextReadBuffer()
+    {
+        std::unique_ptr<SeekableReadBuffer> reader;
+
+        assert(!internal_buffer.empty());
+        assert(right_offset >= current_offset);
+
+        size_t max_bytes_to_read = std::min(right_offset - current_offset, internal_buffer.size());
+        if (!max_bytes_to_read)
+            return reader;
+
+        auto cache = file_segments_cache.getOrSet(cache_key, offset);
+        auto cache_segment = cache_policy->find(cache_key, current_offset, /* size */0);
+        if (cache_segment)
         {
-            size_t max_size = end_offset ? end_offset - current_offset : 0;
-            if (!max_size || max_size > working_buffer.size())
-                max_size = working_buffer.size();
-            DiskCachePolicy::CachePart part(current_offset, max_size);
-            if (retries > 0)
-                part = cache_policy->find(cache_key, current_offset, max_size);
-            else
-            {   // Max retry attempts reached
-                // Came here when part present in index but absent on disk, several times
-                LOG_WARNING(log, "ensureFrom attempts max retries for key {}", cache_key);
-                part.type = DiskCachePolicy::CachePart::CachePartType::ABSENT_NO_CACHE;
-            }
+            assert(cache_segment.hasBytesToRead(current_offset));
 
-            if (part.type == DiskCachePolicy::CachePart::CachePartType::EMPTY)
-            {
-                from = std::make_unique<ReadBufferFromEmptyFile>();
-                return;
-            }
+            String cache_path = getCachePath(cache_key, cache_segment.offset, cache_segment.last);
+            size_t bytes_to_read = std::min(cache_segment.size, max_bytes_to_read);
 
-            if (part.type == DiskCachePolicy::CachePart::CachePartType::CACHED)
-            {
-                String cache_path = cache_base_path + "_" + std::to_string(part.offset);
-                LOG_TRACE(log, "ensureFrom try to read key {} from cache {}+{}", cache_path, part.offset, part.size);
-                cache_policy->read(cache_key, part.offset, part.size);
-                try
-                {
-                    size_t required_size = part.size;
-                    if (max_size && (part.offset + part.size > current_offset + max_size))
-                        required_size = current_offset + max_size - part.offset;
-                    auto from_seekable = cache_disk->readFile(cache_path, ReadSettings(), required_size);
-                    if (current_offset > part.offset)
-                        from_seekable->seek(current_offset - part.offset, SEEK_SET);
-                    from = std::move(from_seekable);
-                    current_offset = part.offset + part.size;
-                }
-                catch (const Exception & e)
-                {
-                    if (e.code() == ErrorCodes::FILE_DOESNT_EXIST)
-                    {
-                        LOG_WARNING(log, "Cached file {} not found, try to download", cache_path);
-                        cache_policy->remove(cache_key, part.offset, part.size);
-                        --retries;
-                        continue; // retry
-                    }
-                    else
-                    {
-                        throw;
-                    }
-                }
-            }
+            LOG_TRACE(log,
+                      "Found key `{}` in cache. Current cache segment offset: {}, size: {}, path: {}. Bytes to read: {}",
+                      cache_key, cache_segment.offset, cache_segment.size, cache_path, bytes_to_read);
 
-            if (part.type == DiskCachePolicy::CachePart::CachePartType::ABSENT)
-            {
-                LOG_TRACE(log, "ensureFrom download key {} from s3 {}+{}", cache_key, part.offset, part.size);
+            cache_policy->read(cache_key, cache_segment.offset, cache_segment.size);
+            reader = cache_disk->readFile(cache_path, ReadSettings(), bytes_to_read);
+
+            if (current_offset > cache_segment.offset)
+                reader->seek(current_offset - cache_segment.offset, SEEK_SET);
+
+            return reader;
+        }
+
+        LOG_TRACE(log,
+                  "Key `{}` is not in cache. Current cache segment offset: {}, size: {}, path: {}. Bytes to read: {}",
+                  cache_key, cache_segment.offset, cache_segment.size, cache_path, bytes_to_read);
+
                 auto to_remove = cache_policy->reserve(part.size);
                 for (auto & entry_to_remove : to_remove)
                 {
-                    String remove_cache_path = DiskCache::getCacheBasePath(entry_to_remove.first) + "_" + std::to_string(entry_to_remove.second);
+                    String remove_cache_path = DiskCache::getCacheBasePath(entry_to_remove.key) + "_" + std::to_string(entry_to_remove.offset);
                     LOG_TRACE(log, "Remove cached file {}", remove_cache_path);
                     cache_disk->removeFileIfExists(remove_cache_path);
                 }
@@ -736,7 +717,7 @@ private:
                 }
             }
 
-            if (part.type == DiskCachePolicy::CachePart::CachePartType::ABSENT_NO_CACHE)
+            if (part.type == DiskCachePolicy::FileSegment::FileSegmentType::ABSENT_NO_CACHE)
             {
                 LOG_TRACE(log, "ensureFrom download key {} from s3 {}+{} without caching", cache_key, part.offset, part.size);
                 ProfileEvents::increment(ProfileEvents::DiskCacheRequestsOut, 1);
@@ -753,7 +734,9 @@ private:
             }
 
             if (use_external_buffer)
+            {
                 from->set(working_buffer.begin(), working_buffer.size());
+            }
 
             swap(*from);
 
@@ -762,20 +745,28 @@ private:
         }
     }
 
+    using FileSegmentCache = LRUResourceCache<String, CachedFileSegment, RemoteFileCacheWeightFunction, RemoteFileCacheReleaseFunction>;
+    using FileSegmentCachePtr = std::shared_ptr<FileSegmentCache>;
+
+    FileSegmentCachePtr file_segments_cache;
+
+    std::shared_ptr<LRURes>
     std::shared_ptr<DiskLocal> cache_disk;
     std::shared_ptr<DiskCachePolicy> cache_policy;
     String cache_key;
     String cache_base_path;
+
     size_t current_offset = 0;
-    size_t end_offset = 0;
+    size_t right_offset = 0;
+
     std::shared_ptr<DiskCacheDownloader> downloader;
 
     std::unique_ptr<ReadBuffer> from;
     std::unique_ptr<WriteBuffer> cache;
 
-    Poco::Logger * log = nullptr;
+    Poco::Logger * log = &Poco::Logger::get("CacheableMultipartReadBuffer");
 
-    DiskCachePolicy::CachePart::CachePartType current_type = DiskCachePolicy::CachePart::CachePartType::EMPTY;
+    DiskCachePolicy::FileSegment::FileSegmentType current_type = DiskCachePolicy::FileSegment::FileSegmentType::EMPTY;
 
     bool use_external_buffer = false;
 };
@@ -784,11 +775,9 @@ private:
 std::unique_ptr<ReadBuffer> DiskCache::find(const String & path, size_t offset, size_t size, std::shared_ptr<DiskCacheDownloader> downloader)
 {
     String cache_key = getKey(path);
-
     String cache_path = getCacheBasePath(cache_key);
 
-    return std::unique_ptr<ReadBuffer>{ new CacheableMultipartReadBuffer(cache_disk, cache_policy,
-        cache_key, cache_path, offset, size, downloader) };
+    return std::make_unique<CacheableMultipartReadBuffer>(cache_disk, cache_policy, cache_key, cache_path, offset, size, downloader);
 }
 
 void DiskCache::remove(const String & path)
@@ -878,7 +867,7 @@ void DiskCache::reload()
                 auto to_remove = cache_policy->add(key, cache_file_size, offset, size, true);
                 for (auto & entry_to_remove : to_remove)
                 {
-                    String remove_cache_path = DiskCache::getCacheBasePath(entry_to_remove.first) + "_" + std::to_string(entry_to_remove.second);
+                    String remove_cache_path = DiskCache::getCacheBasePath(entry_to_remove.key) + "_" + std::to_string(entry_to_remove.offset);
                     files_to_remove.insert(remove_cache_path);
                 }
             }

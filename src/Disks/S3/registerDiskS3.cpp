@@ -200,7 +200,7 @@ void registerDiskS3(DiskFactory & factory)
             size_t cache_size = config.getUInt64(config_prefix + ".data_cache_size_limit", 1024*1024*1024);
             size_t cache_nodes = config.getUInt64(config_prefix + ".data_cache_nodes_limit", 1024*1024);
 
-            std::shared_ptr<DiskCacheLRUPolicy> cache_policy = std::make_shared<DiskCacheLRUPolicy>(cache_size, cache_nodes);
+            auto cache_policy = std::make_shared<DiskCacheLRUPolicy>(cache_size, cache_nodes);
 
             data_cache_ptr = std::make_shared<DiskCache>(cache_disk, std::move(cache_policy));
         }

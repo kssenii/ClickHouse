@@ -12,45 +12,63 @@ namespace DB
 class DiskCachePolicy
 {
 public:
-    virtual ~DiskCachePolicy() {}
+    virtual ~DiskCachePolicy() = default;
 
-    struct CachePart
+    struct FileSegment
     {
-        enum class CachePartType
+        enum class FileSegmentType
         {
             CACHED,
             ABSENT,
             ABSENT_NO_CACHE,
-            EMPTY,
         };
-        CachePart(size_t offset_, size_t size_) : offset(offset_), size(size_) {}
+
+        FileSegment(size_t offset_, size_t size_) : offset(offset_), size(size_) {}
+
+        FileSegmentType type = FileSegmentType::CACHED;
         size_t offset;
         size_t size;
-        CachePartType type = CachePartType::CACHED;
+        bool last = false;
+
+        /// Check there is non-zero bytes to read from segment
+        bool hasBytesToRead(size_t offset_) const
+        {
+            return offset <= offset_ && offset + size < offset_;
+        }
     };
 
-    typedef std::list<CachePart> CachePartList;
+    using FileSegmentList = std::list<FileSegment>;
+
+    struct CacheEntry
+    {
+        CacheEntry(const String & key_, size_t offset_, size_t size_) : key(key_), offset(offset_), size(size_) {}
+
+        String key;
+        size_t offset; // part offset
+        size_t size; // part size in cache
+    };
+
+    using CacheEntries = std::vector<CacheEntry>;
 
     /// fing object parts in cache
     /// wait if some part is in progress
     /// return next part to read or download
     /// returned part marked as in progress
-    virtual CachePart find(const String & key, size_t offset, size_t size) = 0;
+    virtual FileSegment find(const String & key, size_t offset, size_t size) = 0;
 
     /// reserve some size in cache, with eviction old records if needs
     /// returns list of keys to remove from cache
-    virtual std::list<std::pair<String, size_t>> reserve(size_t size) = 0;
+    virtual CacheEntries reserve(size_t size) = 0;
 
     /// insert file in cache index
     /// returns list of keys to remove from cache (as reserve)
-    virtual std::list<std::pair<String, size_t>> add(const String & key, size_t file_size,
-        size_t offset, size_t size, bool restore) = 0;
+    virtual CacheEntries add(const String & key, size_t file_size, size_t offset, size_t size, bool restore) = 0;
 
     /// call on download error
     virtual void error(const String & key, size_t offset) = 0;
 
     /// remove file from cache index
-    virtual CachePartList remove(const String & key) = 0;
+    virtual FileSegmentList remove(const String & key) = 0;
 
     /// remove one record from cache index
     virtual void remove(const String & key, size_t offset, size_t size) = 0;
@@ -62,48 +80,43 @@ public:
 class DiskCacheLRUPolicy : public DiskCachePolicy
 {
 public:
-    DiskCacheLRUPolicy(size_t cache_size_limit_, size_t nodes_limit_);
-    ~DiskCacheLRUPolicy() override {}
+    DiskCacheLRUPolicy(size_t cache_max_size_, size_t cache_entries_max_num_);
 
-    CachePart find(const String & key, size_t offset, size_t size) override;
-    std::list<std::pair<String, size_t>> reserve(size_t size) override;
-    std::list<std::pair<String, size_t>> add(const String & key, size_t file_size,
-        size_t offset, size_t size, bool restore) override;
+    ~DiskCacheLRUPolicy() override = default;
+
+    FileSegment find(const String & key, size_t offset, size_t size) override;
+
+    CacheEntries reserve(size_t size) override;
+
+    CacheEntries add(const String & key, size_t file_size, size_t offset, size_t size, bool restore) override;
+
     void error(const String & key, size_t offset) override;
-    CachePartList remove(const String & key) override;
+
+    FileSegmentList remove(const String & key) override;
+
     void remove(const String & key, size_t offset, size_t size) override;
+
     void read(const String & key, size_t offset, size_t size) override;
 
 private:
     void complete(const String & key, size_t offset, FileDownloadStatus status);
-    std::list<std::pair<String, size_t>> reserve_unsafe(size_t size, bool free_only = false);
 
     size_t cache_size_limit = 0;
     size_t nodes_limit = 0;
     size_t cache_size = 0;
     size_t reserved_size = 0;
 
-    struct CacheEntry
-    {
-        CacheEntry(const String & key_, size_t offset_, size_t size_) : key(key_), offset(offset_), size(size_) {}
-        String key;
-        // part offset
-        size_t offset;
-        // part size in cache
-        size_t size;
-    };
-
     struct FileEntry
     {
-        // file size on remote storage
-        size_t size = 0;
-        // parts[offset]
-        std::map<size_t, std::list<CacheEntry>::iterator> parts;
+        size_t size = 0; // file size on remote storage
+        std::map<size_t, std::list<CacheEntry>::iterator> parts; // parts[offset]
     };
+
+    CacheEntries reserveUnsafe(size_t size, bool free_only = false);
 
     struct CacheInProgressEntry : public FileDownloadMetadata
     {
-        CacheInProgressEntry(size_t size_);
+        explicit CacheInProgressEntry(size_t size_);
 
         size_t size;
     };
@@ -121,13 +134,13 @@ private:
 
     std::unordered_map<uint64_t, uint32_t> read_thread_ids;
 
-    Poco::Logger * log = nullptr;
+    Poco::Logger * log = &Poco::Logger::get("DiskCacheLRUPolicy");
 };
 
 class DiskCacheDownloader
 {
 public:
-    virtual ~DiskCacheDownloader() {}
+    virtual ~DiskCacheDownloader() = default;
 
     struct RemoteFSStream
     {

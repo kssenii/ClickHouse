@@ -311,7 +311,7 @@ public:
             req.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
             LOG_TEST(log, "Read S3 object. Bucket: {}, Key: {}, Range: {}-{}, this: {}", bucket, key, offset, offset + size - 1, reinterpret_cast<size_t>(this));
         }
-        else
+        else if (offset)
         {
             req.SetRange(fmt::format("bytes={}-", offset));
             LOG_TEST(log, "Read S3 object. Bucket: {}, Key: {}, Offset: {}, this: {}", bucket, key, offset, reinterpret_cast<size_t>(this));
