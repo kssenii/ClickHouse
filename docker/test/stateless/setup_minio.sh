@@ -40,14 +40,14 @@ sleep 5
 ./mc alias set clickminio http://localhost:11111 clickhouse clickhouse
 ./mc admin user add clickminio test testtest
 ./mc admin policy set clickminio readwrite user=test
-./mc mb clickminio/test
+#./mc mb clickminio/test
 
 
 # Upload data to Minio. By default after unpacking all tests will in
 # /usr/share/clickhouse-test/queries
 
-TEST_PATH=${1:-/usr/share/clickhouse-test}
-MINIO_DATA_PATH=${TEST_PATH}/queries/0_stateless/data_minio
+TEST_PATH=/home/kssenii/workspace/CH-2/tests
+MINIO_DATA_PATH=${TEST_PATH}/queries/0_stateless/minio_data
 
 # Iterating over globs will cause redudant FILE variale to be a path to a file, not a filename
 # shellcheck disable=SC2045

@@ -1,59 +1,10 @@
-#include <iomanip>
-#include <iostream>
-#include <gtest/gtest.h>
-#include <Common/FileCache.h>
-#include <Common/CurrentThread.h>
-#include <Common/filesystemHelpers.h>
 #include <Common/tests/gtest_global_context.h>
-#include <Common/SipHash.h>
-#include <Common/hex.h>
+#include <Common/CurrentThread.h>
 #include <Interpreters/Context.h>
-#include <IO/ReadHelpers.h>
-#include <IO/WriteHelpers.h>
-#include <filesystem>
-#include <thread>
+#include <Common/tests/lru_file_cache_test_helpers.h>
 
-namespace fs = std::filesystem;
 
 String cache_base_path = fs::current_path() / "test_lru_file_cache" / "";
-
-void assertRange(
-    [[maybe_unused]] size_t assert_n, DB::FileSegmentPtr file_segment,
-    const DB::FileSegment::Range & expected_range, DB::FileSegment::State expected_state)
-{
-    auto range = file_segment->range();
-
-    std::cerr << fmt::format("\nAssert #{} : {} == {} (state: {} == {})\n", assert_n,
-                             range.toString(), expected_range.toString(),
-                             toString(file_segment->state()), toString(expected_state));
-
-    ASSERT_EQ(range.left, expected_range.left);
-    ASSERT_EQ(range.right, expected_range.right);
-    ASSERT_EQ(file_segment->state(), expected_state);
-};
-
-void printRanges(const auto & segments)
-{
-    std::cerr << "\nHaving file segments: ";
-    for (const auto & segment : segments)
-        std::cerr << '\n' << segment->range().toString() << " (state: " + DB::FileSegment::stateToString(segment->state()) + ")" << "\n";
-}
-
-std::vector<DB::FileSegmentPtr> fromHolder(const DB::FileSegmentsHolder & holder)
-{
-    return std::vector<DB::FileSegmentPtr>(holder.file_segments.begin(), holder.file_segments.end());
-}
-
-String keyToStr(const DB::FileCache::Key & key)
-{
-    return getHexUIntLowercase(key);
-}
-
-String getFileSegmentPath(const String & base_path, const DB::FileCache::Key & key, size_t offset)
-{
-    auto key_str = keyToStr(key);
-    return fs::path(base_path) / key_str.substr(0, 3) / key_str / DB::toString(offset);
-}
 
 void download(DB::FileSegmentPtr file_segment)
 {
@@ -85,7 +36,6 @@ void complete(const DB::FileSegmentsHolder & holder)
         file_segment->complete(DB::FileSegment::State::DOWNLOADED);
     }
 }
-
 
 TEST(LRUFileCache, get)
 {
