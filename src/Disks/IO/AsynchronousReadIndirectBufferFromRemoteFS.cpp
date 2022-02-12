@@ -58,6 +58,11 @@ String AsynchronousReadIndirectBufferFromRemoteFS::getFileName() const
     return impl->getFileName();
 }
 
+String AsynchronousReadIndirectBufferFromRemoteFS::getInfoForLog()
+{
+    return impl->getInfoForLog();
+}
+
 
 bool AsynchronousReadIndirectBufferFromRemoteFS::hasPendingDataToRead()
 {
@@ -145,7 +150,7 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
     if (!hasPendingDataToRead())
         return false;
 
-    size_t size = 0;
+    size_t size = 0, offset = 0;
 
     if (prefetch_future.valid())
     {
@@ -156,7 +161,7 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
         {
             auto result = prefetch_future.get();
             size = result.size;
-            auto offset = result.offset;
+            offset = result.offset;
             LOG_TEST(&Poco::Logger::get("AsyncBuffer(" + impl->getFileName() + ")"), "Current size: {}, offset: {}", size, offset);
             assert(offset < size);
 
@@ -178,7 +183,7 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
         ProfileEvents::increment(ProfileEvents::RemoteFSUnprefetchedReads);
         auto result = readInto(memory.data(), memory.size()).get();
         size = result.size;
-        auto offset = result.offset;
+        offset = result.offset;
         LOG_TEST(&Poco::Logger::get("AsyncBuffer(" + impl->getFileName() + ")"), "Current size: {}, offset: {}", size, offset);
         assert(offset < size);
 
@@ -191,8 +196,9 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
         }
     }
 
-    if (file_offset_of_buffer_end != impl->offset())
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Expected equality {} == {}. It's a bug", file_offset_of_buffer_end, impl->offset());
+    if (file_offset_of_buffer_end != impl->getFileOffsetOfBufferEnd())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Expected equality {} == {} (size: {}, offset: {}). It's a bug (Info: {})",
+                        file_offset_of_buffer_end, impl->offset(), size, offset, impl->getInfoForLog());
 
     prefetch_future = {};
     return size;
@@ -202,6 +208,7 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
 off_t AsynchronousReadIndirectBufferFromRemoteFS::seek(off_t offset_, int whence)
 {
     ProfileEvents::increment(ProfileEvents::RemoteFSSeeks);
+    /// TODO: May be makes sence to allow seek in cached buffer if it is inside current read range.
 
     if (whence == SEEK_CUR)
     {

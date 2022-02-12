@@ -27,6 +27,12 @@ public:
 
     off_t getPosition() override;
 
+    String getInfoForLog() override;
+
+    size_t getFileOffsetOfBufferEnd() const override { return file_offset_of_buffer_end; }
+
+    size_t buffer_offset = 0;
+
 private:
     void initialize(size_t offset, size_t size);
 
@@ -70,6 +76,8 @@ private:
     /// Flag to identify usage of threadpool reads
     bool use_external_buffer;
 
+    String path;
+
     ReadType read_type = ReadType::REMOTE_FS_READ_BYPASS_CACHE;
 
     static String toString(ReadType type)
@@ -84,6 +92,8 @@ private:
                 return "REMOTE_FS_READ_AND_PUT_IN_CACHE";
         }
     }
+
+    size_t first_offset = 0;
 };
 
 }

@@ -43,9 +43,11 @@ public:
 
     size_t getFileSize() const;
 
-    size_t offset() const { return file_offset_of_buffer_end; }
+    size_t getFileOffsetOfBufferEnd() const { return file_offset_of_buffer_end; }
 
     bool initialized() const { return current_buf != nullptr; }
+
+    String getInfoForLog();
 
 protected:
     virtual SeekableReadBufferPtr createImplementationBuffer(const String & path, size_t file_size) = 0;

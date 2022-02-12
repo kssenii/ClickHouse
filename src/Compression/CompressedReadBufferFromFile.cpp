@@ -5,6 +5,7 @@
 #include <Compression/LZ4_decompress_faster.h>
 #include <IO/WriteHelpers.h>
 #include <IO/createReadBufferFromFileBase.h>
+#include <base/logger_useful.h>
 
 
 namespace DB
@@ -19,7 +20,15 @@ bool CompressedReadBufferFromFile::nextImpl()
 {
     size_t size_decompressed = 0;
     size_t size_compressed_without_checksum;
-    size_compressed = readCompressedData(size_decompressed, size_compressed_without_checksum, false);
+    try
+    {
+        size_compressed = readCompressedData(size_decompressed, size_compressed_without_checksum, false);
+    }
+    catch (Exception & e)
+    {
+        e.addMessage(fmt::format("Buffer ({}) debug info: {}", typeid(file_in).name(), file_in.getInfoForLog()));
+        throw;
+    }
     if (!size_compressed)
         return false;
 
@@ -101,8 +110,17 @@ size_t CompressedReadBufferFromFile::readBig(char * to, size_t n)
     {
         size_t size_decompressed = 0;
         size_t size_compressed_without_checksum = 0;
+        size_t new_size_compressed;
+        try
+        {
+            new_size_compressed = readCompressedData(size_decompressed, size_compressed_without_checksum, false);
+        }
+        catch (Exception & e)
+        {
+            e.addMessage(fmt::format("Buffer ({}) debug info: {}", typeid(file_in).name(), file_in.getInfoForLog()));
+            throw;
+        }
 
-        size_t new_size_compressed = readCompressedData(size_decompressed, size_compressed_without_checksum, false);
         size_compressed = 0; /// file_in no longer points to the end of the block in working_buffer.
         if (!new_size_compressed)
             return bytes_read;

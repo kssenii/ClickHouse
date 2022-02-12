@@ -88,6 +88,15 @@ ReadBufferFromRemoteFSGather::ReadBufferFromRemoteFSGather(const RemoteMetadata 
 }
 
 
+String ReadBufferFromRemoteFSGather::getInfoForLog()
+{
+    if (!current_buf)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot get info: buffer not initialized");
+
+    return current_buf->getInfoForLog();
+}
+
+
 ReadBufferFromRemoteFSGather::ReadResult ReadBufferFromRemoteFSGather::readInto(char * data, size_t size, size_t offset, size_t ignore)
 {
     /**
@@ -182,19 +191,14 @@ bool ReadBufferFromRemoteFSGather::readImpl()
     }
 
     bool result = current_buf->hasPendingData();
-    if (result)
-    {
-        /// bytes_to_ignore already added.
-        file_offset_of_buffer_end += current_buf->available();
-    }
-    else
-    {
+
+    if (!result)
         result = current_buf->next();
-        if (result)
-            file_offset_of_buffer_end += current_buf->buffer().size();
-    }
+
+    file_offset_of_buffer_end = current_buf->getFileOffsetOfBufferEnd();
 
     swap(*current_buf);
+    assert(offset() <= working_buffer.size());
 
     return result;
 }

@@ -150,6 +150,8 @@ struct FileSegmentsHolder : boost::noncopyable
 
     ~FileSegmentsHolder()
     {
+        std::lock_guard lock(mutex);
+
         /// In CacheableReadBufferFromRemoteFS file segment's downloader removes file segments from
         /// FileSegmentsHolder right after calling file_segment->complete(), so on destruction here
         /// remain only uncompleted file segments.
@@ -158,7 +160,10 @@ struct FileSegmentsHolder : boost::noncopyable
             segment->complete();
     }
 
+    String toString();
+
     FileSegments file_segments{};
+    std::mutex mutex;
 };
 
 }
