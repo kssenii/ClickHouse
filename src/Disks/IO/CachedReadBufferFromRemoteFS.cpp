@@ -272,9 +272,9 @@ SeekableReadBufferPtr CachedReadBufferFromRemoteFS::getReadBufferForFileSegment(
     /// TODO: For remote FS read need to set maximum possible right offset -- of
     /// the last empty segment and in s3 buffer check > instead of !=.
 
-    // auto last_non_downloaded_offset = getLastNonDownloadedOffset();
-    // implementation_buffer->setReadUntilPosition(last_non_downloaded_offset ? *last_non_downloaded_offset : range.right + 1); /// [..., range.right]
-    implementation_buffer->setReadUntilPosition(range.right + 1); /// [..., range.right]
+    auto last_non_downloaded_offset = getLastNonDownloadedOffset();
+    implementation_buffer->setReadUntilPosition(last_non_downloaded_offset ? *last_non_downloaded_offset : range.right + 1); /// [..., range.right]
+    // implementation_buffer->setReadUntilPosition(range.right + 1); /// [..., range.right]
 
     switch (read_type)
     {
@@ -334,6 +334,42 @@ bool CachedReadBufferFromRemoteFS::completeFileSegmentAndGetNext()
 
     auto file_segment_it = current_file_segment_it++;
     auto & file_segment = *file_segment_it;
+
+    if (file_segment->state() == FileSegment::State::DOWNLOADED)
+    {
+        /**
+        * Check if we can pass implementation buffer to one of the next file segments
+        * to avoid seeks.
+        *
+        *     [___________]         -- read_range_1 for query1
+        *        [_______________]  -- read_range_2 for query2
+        *     ^___________^______^
+        *     | segment1 | segment2
+        *
+        * Here query2 can reuse implementation buffer, which downloaded segment1.
+        */
+
+        /// TODO: If next file segment does not need to be downloaded, check for non-downloaded
+        /// segments within a seek avoiding range.
+
+        auto && completed_segment_file_reader = file_segment->extractRemoteFileReader();
+        if (completed_segment_file_reader)
+        {
+            auto it = current_file_segment_it;
+            for (; it != file_segments_holder->file_segments.end(); ++it)
+            {
+                auto current_file_segment = *it;
+                auto state = file_segment->state();
+                if (state != FileSegment::State::DOWNLOADED
+                    && state != FileSegment::State::PARTIALLY_DOWNLOADED_NO_CONTINUATION
+                    && current_file_segment->getRemoteFileReader() != nullptr
+                    && current_file_segment->setRemoteFileReaderIfEmpty(completed_segment_file_reader))
+                {
+                    break;
+                }
+            }
+        }
+    }
 
     [[maybe_unused]] const auto & range = file_segment->range();
     assert(file_offset_of_buffer_end > range.right);

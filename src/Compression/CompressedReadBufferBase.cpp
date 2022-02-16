@@ -13,6 +13,7 @@
 #include <Compression/CompressionInfo.h>
 #include <IO/WriteHelpers.h>
 #include <IO/Operators.h>
+#include <IO/ReadBufferFromFileBase.h>
 
 
 namespace ProfileEvents
@@ -181,7 +182,16 @@ size_t CompressedReadBufferBase::readCompressedData(size_t & size_decompressed, 
     if (!disable_checksum)
     {
         Checksum & checksum = *reinterpret_cast<Checksum *>(own_compressed_buffer.data());
-        validateChecksum(compressed_buffer, size_compressed_without_checksum, checksum);
+        try
+        {
+            validateChecksum(compressed_buffer, size_compressed_without_checksum, checksum);
+        }
+        catch (Exception & e)
+        {
+            if (auto * it = dynamic_cast<ReadBufferFromFileBase *>(compressed_in))
+                e.addMessage(fmt::format("Buffer ({}) debug info: {}", typeid(*compressed_in).name(), it->getInfoForLog()));
+            throw;
+        }
     }
 
     return size_compressed_without_checksum + sizeof(Checksum);

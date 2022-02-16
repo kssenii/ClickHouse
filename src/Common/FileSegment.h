@@ -101,6 +101,10 @@ public:
 
     void setRemoteFileReader(RemoteFileReaderPtr remote_file_reader_);
 
+    bool setRemoteFileReaderIfEmpty(RemoteFileReaderPtr remote_file_reader_);
+
+    RemoteFileReaderPtr && extractRemoteFileReader();
+
     String getOrSetDownloader();
 
     String getDownloader() const;

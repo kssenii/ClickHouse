@@ -99,6 +99,8 @@ FileSegment::RemoteFileReaderPtr FileSegment::getRemoteFileReader()
 
 void FileSegment::setRemoteFileReader(RemoteFileReaderPtr remote_file_reader_)
 {
+    std::lock_guard segment_lock(mutex);
+
     if (!isDownloader())
         throw Exception(ErrorCodes::FILE_CACHE_ERROR, "Only downloader can use remote filesystem file reader");
 
@@ -106,6 +108,27 @@ void FileSegment::setRemoteFileReader(RemoteFileReaderPtr remote_file_reader_)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Remote file reader already exists");
 
     remote_file_reader = remote_file_reader_;
+}
+
+bool FileSegment::setRemoteFileReaderIfEmpty(RemoteFileReaderPtr remote_file_reader_)
+{
+    std::lock_guard segment_lock(mutex);
+
+    if (remote_file_reader)
+        return false;
+
+    remote_file_reader = remote_file_reader_;
+    return true;
+}
+
+FileSegment::RemoteFileReaderPtr && FileSegment::extractRemoteFileReader()
+{
+    std::lock_guard segment_lock(mutex);
+
+    if (download_state != State::DOWNLOADED)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Remote file reader can be extracted only from downloaded file segment");
+
+    return std::move(remote_file_reader);
 }
 
 void FileSegment::write(const char * from, size_t size)
