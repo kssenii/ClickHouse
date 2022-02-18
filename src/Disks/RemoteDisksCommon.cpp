@@ -72,7 +72,8 @@ FileCachePtr getCachePtrForDisk(
 
     size_t max_cache_size = config.getUInt64(config_prefix + ".data_cache_max_size", 1024*1024*1024);
     size_t max_cache_elements = config.getUInt64(config_prefix + ".data_cache_max_elements", 1024*1024);
+    size_t max_file_segment_size = config.getUInt64(config_prefix + ".max_file_segment_size", 100*1024*1024);
 
-    return FileCacheFactory::instance().getOrCreate(cache_base_path, max_cache_size, max_cache_elements);
+    return FileCacheFactory::instance().getOrCreate(cache_base_path, max_cache_size, max_cache_elements, max_file_segment_size);
 }
 }

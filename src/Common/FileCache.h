@@ -31,7 +31,7 @@ public:
 
     FileCache(
         const String & cache_base_path_,
-        size_t max_size_, size_t max_element_size_);
+        size_t max_size_, size_t max_element_size_, size_t max_file_segment_size_);
 
     virtual ~FileCache() = default;
 
@@ -65,8 +65,9 @@ public:
 
 protected:
     String cache_base_path;
-    size_t max_size = 0;
-    size_t max_element_size = 0;
+    size_t max_size;
+    size_t max_element_size;
+    size_t max_file_segment_size;
 
     mutable std::mutex mutex;
 
@@ -91,7 +92,7 @@ using FileCachePtr = std::shared_ptr<FileCache>;
 class LRUFileCache final : public FileCache
 {
 public:
-    LRUFileCache(const String & cache_base_path_, size_t max_size_, size_t max_element_size_ = 0);
+    LRUFileCache(const String & cache_base_path_, size_t max_size_, size_t max_element_size_, size_t max_file_segment_size_);
 
     FileSegmentsHolder getOrSet(const Key & key, size_t offset, size_t size) override;
 
@@ -164,6 +165,9 @@ private:
     size_t availableSize() const { return max_size - current_size; }
 
     void restore();
+
+    FileSegments splitRangeIntoEmptyCells(
+        const Key & key, size_t offset, size_t size, std::lock_guard<std::mutex> & cache_lock);
 
 public:
     struct Stat
