@@ -101,13 +101,31 @@ FileSegment::RemoteFileReaderPtr FileSegment::getRemoteFileReader()
     return remote_file_reader;
 }
 
+FileSegment::RemoteFileReaderPtr FileSegment::extractRemoteFileReader()
+{
+    std::lock_guard segment_lock(mutex);
+    return std::move(remore_file_reader);
+}
+
 void FileSegment::setRemoteFileReader(RemoteFileReaderPtr remote_file_reader_)
 {
     if (!isDownloader())
         throw Exception(ErrorCodes::REMOTE_FS_OBJECT_CACHE_ERROR, "Only downloader can use remote filesystem file reader");
 
+    std::lock_guard segment_lock(mutex);
+
     if (remote_file_reader)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Remote file reader already exists");
+
+    remote_file_reader = remote_file_reader_;
+}
+
+void FileSegment::setRemoteFileReaderIfEmpty(RemoteFileReaderPtr remote_file_reader_)
+{
+    std::lock_guard segment_lock(mutex);
+
+    if (remote_file_reader)
+        return;
 
     remote_file_reader = remote_file_reader_;
 }

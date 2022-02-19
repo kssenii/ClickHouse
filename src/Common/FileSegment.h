@@ -99,7 +99,11 @@ public:
 
     RemoteFileReaderPtr getRemoteFileReader();
 
+    RemoteFileReaderPtr && extractRemoteFileReader();
+
     void setRemoteFileReader(RemoteFileReaderPtr remote_file_reader_);
+
+    void setRemoteFileReaderIfEmpty(RemoteFileReaderPtr remote_file_reader_);
 
     String getOrSetDownloader();
 
