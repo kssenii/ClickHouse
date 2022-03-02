@@ -55,7 +55,11 @@ public:
 
     void attachTable(ContextPtr context, const String & table_name, const StoragePtr & table, const String & relative_table_path) override;
 
-    StoragePtr detachTable(ContextPtr context, const String & table_name) override;
+    StoragePtr detachTable(ContextPtr, const String &) override
+    {
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED,
+                        "DETACH TABLE not allowed. If you want to remove table from replication, use DETACH TABLE PERMANENTLY");
+    }
 
     void dropTable(ContextPtr local_context, const String & name, bool no_delay) override;
 
@@ -70,13 +74,8 @@ public:
     void shutdown() override;
 
     String getPostgreSQLDatabaseName() const { return remote_database_name; }
-    
-    void detachTablePermanently(ContextPtr /*context*/, const String & /*name*/) override
-    {
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED,
-                        "DETACH PERMANENTLY does the same as simple DETACH (permanent removal of PostgeSQL table from replication). "
-                        "Please, use DETACH for engine {}", getEngineName());
-    }
+
+    void detachTablePermanently(ContextPtr context, const String & name) override;
 
 protected:
     ASTPtr getCreateTableQueryImpl(const String & table_name, ContextPtr local_context, bool throw_on_error) const override;

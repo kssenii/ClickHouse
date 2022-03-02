@@ -310,62 +310,52 @@ void DatabaseMaterializedPostgreSQL::attachTable(ContextPtr context_, const Stri
 }
 
 
-StoragePtr DatabaseMaterializedPostgreSQL::detachTable(ContextPtr context_, const String & table_name)
+void DatabaseMaterializedPostgreSQL::detachTablePermanently(ContextPtr context_, const String & table_name)
 {
     /// If there is query context then we need to detach materialized storage.
     /// If there is no query context then we need to detach internal storage from atomic database.
-    if (CurrentThread::isInitialized() && CurrentThread::get().getQueryContext())
+    auto & table_to_delete = materialized_tables[table_name];
+    if (!table_to_delete)
+        throw Exception(ErrorCodes::UNKNOWN_TABLE, "Materialized table `{}` does not exist", table_name);
+
+    auto tables_to_replicate = getFormattedTablesList(table_name);
+
+    /// tables_to_replicate can be empty if postgres database had no tables when this database was created.
+    SettingChange new_setting("materialized_postgresql_tables_list", tables_to_replicate);
+    auto alter_query = createAlterSettingsQuery(new_setting);
+
     {
-        auto & table_to_delete = materialized_tables[table_name];
-        if (!table_to_delete)
-            throw Exception(ErrorCodes::UNKNOWN_TABLE, "Materialized table `{}` does not exist", table_name);
+        auto current_context = Context::createCopy(context_);
+        current_context->setInternalQuery(true);
+        InterpreterAlterQuery(alter_query, current_context).execute();
+    }
 
-        auto tables_to_replicate = getFormattedTablesList(table_name);
+    auto nested = table_to_delete->as<StorageMaterializedPostgreSQL>()->getNested();
+    if (!nested)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Inner table `{}` does not exist", table_name);
 
-        /// tables_to_replicate can be empty if postgres database had no tables when this database was created.
-        SettingChange new_setting("materialized_postgresql_tables_list", tables_to_replicate);
-        auto alter_query = createAlterSettingsQuery(new_setting);
+    std::lock_guard lock(handler_mutex);
+    replication_handler->removeTableFromReplication(table_name);
 
-        {
-            auto current_context = Context::createCopy(getContext()->getGlobalContext());
-            current_context->setInternalQuery(true);
-            InterpreterAlterQuery(alter_query, current_context).execute();
-        }
-
-        auto nested = table_to_delete->as<StorageMaterializedPostgreSQL>()->getNested();
-        if (!nested)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Inner table `{}` does not exist", table_name);
-
-        std::lock_guard lock(handler_mutex);
-        replication_handler->removeTableFromReplication(table_name);
-
-        try
-        {
-            auto current_context = Context::createCopy(getContext()->getGlobalContext());
-            current_context->makeQueryContext();
-            DatabaseAtomic::dropTable(current_context, table_name, true);
-        }
-        catch (Exception & e)
-        {
-            /// We already removed this table from replication and adding it back will be an overkill..
-            /// TODO: this is bad, we leave a table lying somewhere not dropped, and if user will want
-            /// to move it back into replication, he will fail to do so because there is undropped nested with the same name.
-            /// This can also happen if we crash after removing table from replication and before dropping nested.
-            /// As a solution, we could drop a table if it already exists and add a fresh one instead for these two cases.
-            /// TODO: sounds good.
-            materialized_tables.erase(table_name);
-
-            e.addMessage("while removing table `" + table_name + "` from replication");
-            throw;
-        }
-
+    try
+    {
+        DatabaseAtomic::dropTable(context_, table_name, true);
+    }
+    catch (Exception & e)
+    {
+        /// We already removed this table from replication and adding it back will be an overkill..
+        /// TODO: this is bad, we leave a table lying somewhere not dropped, and if user will want
+        /// to move it back into replication, he will fail to do so because there is undropped nested with the same name.
+        /// This can also happen if we crash after removing table from replication and before dropping nested.
+        /// As a solution, we could drop a table if it already exists and add a fresh one instead for these two cases.
+        /// TODO: sounds good.
         materialized_tables.erase(table_name);
-        return nullptr;
+
+        e.addMessage("while removing table `" + table_name + "` from replication");
+        throw;
     }
-    else
-    {
-        return DatabaseAtomic::detachTable(context_, table_name);
-    }
+
+    materialized_tables.erase(table_name);
 }
 
 
