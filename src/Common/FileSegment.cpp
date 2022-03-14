@@ -46,7 +46,16 @@ FileSegment::State FileSegment::state() const
 size_t FileSegment::getDownloadOffset() const
 {
     std::lock_guard segment_lock(mutex);
-    return range().left + downloaded_size;
+    return range().left + getDownloadedSize(segment_lock);
+}
+
+size_t FileSegment::getDownloadedSize(std::lock_guard<std::mutex> & /* segment_lock */) const
+{
+    if (download_state == State::DOWNLOADED)
+        return downloaded_size;
+
+    std::lock_guard download_lock(download_mutex);
+    return downloaded_size;
 }
 
 String FileSegment::getCallerId()
@@ -183,7 +192,12 @@ void FileSegment::write(const char * from, size_t size, size_t offset_)
     try
     {
         cache_writer->write(from, size);
+
+        std::lock_guard download_lock(download_mutex);
+
         cache_writer->next();
+
+        downloaded_size += size;
     }
     catch (...)
     {
@@ -200,9 +214,6 @@ void FileSegment::write(const char * from, size_t size, size_t offset_)
 
         throw;
     }
-
-    std::lock_guard segment_lock(mutex);
-    downloaded_size += size;
 }
 
 FileSegment::State FileSegment::wait()
@@ -347,7 +358,7 @@ void FileSegment::complete()
         if (download_state == State::SKIP_CACHE || detached)
             return;
 
-        if (downloaded_size == range().size() && download_state != State::DOWNLOADED)
+        if (download_state != State::DOWNLOADED && getDownloadedSize(segment_lock) == range().size())
             setDownloaded(segment_lock);
     }
 
@@ -384,10 +395,11 @@ void FileSegment::completeImpl(bool allow_non_strict_checking)
 
         if (!download_can_continue)
         {
-            if (!downloaded_size)
+            size_t current_downloaded_size = getDownloadedSize(segment_lock);
+            if (current_downloaded_size == 0)
             {
                 download_state = State::SKIP_CACHE;
-                LOG_TEST(log, "Remove cell {} (downloaded: {})", range().toString(), downloaded_size);
+                LOG_TEST(log, "Remove cell {} (nothing downloaded)", range().toString());
                 cache->remove(key(), offset(), cache_lock, segment_lock);
 
                 detached = true;
@@ -400,7 +412,7 @@ void FileSegment::completeImpl(bool allow_non_strict_checking)
                 * in FileSegmentsHolder represent a contiguous range, so we can resize
                 * it only when nobody needs it.
                 */
-                LOG_TEST(log, "Resize cell {} to downloaded: {}", range().toString(), downloaded_size);
+                LOG_TEST(log, "Resize cell {} to downloaded: {}", range().toString(), current_downloaded_size);
                 cache->reduceSizeToDownloaded(key(), offset(), cache_lock, segment_lock);
 
                 detached = true;
@@ -435,7 +447,7 @@ String FileSegment::getInfoForLogImpl(std::lock_guard<std::mutex> & /* segment_l
     WriteBufferFromOwnString info;
     info << "File segment: " << range().toString() << ", ";
     info << "state: " << download_state << ", ";
-    info << "downloaded size: " << downloaded_size << ", ";
+    info << "downloaded size: " << getDownloadedSize(segment_lock) << ", ";
     info << "downloader id: " << downloader_id << ", ";
     info << "caller id: " << getCallerId();
 
