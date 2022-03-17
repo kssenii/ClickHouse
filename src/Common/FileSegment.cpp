@@ -176,44 +176,45 @@ void FileSegment::write(const char * from, size_t size, size_t offset_)
 
     {
         std::lock_guard segment_lock(mutex);
-        auto download_offset = range().left + downloaded_size;
-        if (offset_ != download_offset)
-            throw Exception(ErrorCodes::REMOTE_FS_OBJECT_CACHE_ERROR,
-                            "Attempt to write {} bytes to offset: {}, but current download offset is {} ({})",
-                            size, offset_, download_offset, getInfoForLogImpl(segment_lock));
+
+        {
+            auto download_offset = range().left + downloaded_size;
+            if (offset_ != download_offset)
+                throw Exception(ErrorCodes::REMOTE_FS_OBJECT_CACHE_ERROR,
+                                "Attempt to write {} bytes to offset: {}, but current download offset is {} ({})",
+                                size, offset_, download_offset, getInfoForLogImpl(segment_lock));
+        }
+
+        if (!cache_writer)
+        {
+            auto download_path = cache->getPathInLocalCache(key(), offset());
+            cache_writer = std::make_unique<WriteBufferFromFile>(download_path);
+        }
+
+        try
+        {
+            cache_writer->write(from, size);
+
+            cache_writer->next();
+
+            downloaded_size += size;
+        }
+        catch (...)
+        {
+            LOG_ERROR(log, "Failed to write to cache. File segment info: {}", getInfoForLog());
+
+            download_state = State::PARTIALLY_DOWNLOADED_NO_CONTINUATION;
+
+            cache_writer->finalize();
+            cache_writer.reset();
+
+            cv.notify_all();
+
+            throw;
+        }
     }
 
-    if (!cache_writer)
-    {
-        auto download_path = cache->getPathInLocalCache(key(), offset());
-        cache_writer = std::make_unique<WriteBufferFromFile>(download_path);
-    }
-
-    try
-    {
-        cache_writer->write(from, size);
-
-        std::lock_guard download_lock(download_mutex);
-
-        cache_writer->next();
-
-        downloaded_size += size;
-    }
-    catch (...)
-    {
-        std::lock_guard segment_lock(mutex);
-
-        LOG_ERROR(log, "Failed to write to cache. File segment info: {}", getInfoForLog());
-
-        download_state = State::PARTIALLY_DOWNLOADED_NO_CONTINUATION;
-
-        cache_writer->finalize();
-        cache_writer.reset();
-
-        cv.notify_all();
-
-        throw;
-    }
+    assert(getDownloadOffset() == offset_ + size);
 }
 
 FileSegment::State FileSegment::wait()
@@ -442,7 +443,7 @@ String FileSegment::getInfoForLog() const
     return getInfoForLogImpl(segment_lock);
 }
 
-String FileSegment::getInfoForLogImpl(std::lock_guard<std::mutex> & /* segment_lock */) const
+String FileSegment::getInfoForLogImpl(std::lock_guard<std::mutex> & segment_lock) const
 {
     WriteBufferFromOwnString info;
     info << "File segment: " << range().toString() << ", ";

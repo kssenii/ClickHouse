@@ -19,7 +19,16 @@ bool CompressedReadBufferFromFile::nextImpl()
 {
     size_t size_decompressed = 0;
     size_t size_compressed_without_checksum;
-    size_compressed = readCompressedData(size_decompressed, size_compressed_without_checksum, false);
+    try
+    {
+        size_compressed = readCompressedData(size_decompressed, size_compressed_without_checksum, false);
+    }
+    catch (DB::Exception & e)
+    {
+        e.addMessage("cache_info: " + file_in.getInfoForLog());
+        tryLogCurrentException(__PRETTY_FUNCTION__);
+        throw;
+    }
     if (!size_compressed)
         return false;
 

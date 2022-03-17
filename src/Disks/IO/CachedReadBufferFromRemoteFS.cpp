@@ -70,7 +70,7 @@ SeekableReadBufferPtr CachedReadBufferFromRemoteFS::getCacheReadBuffer(size_t of
     return buf;
 }
 
-SeekableReadBufferPtr CachedReadBufferFromRemoteFS::getRemoteFSReadBuffer(FileSegmentPtr & file_segment, ReadType read_type_)
+SeekableReadBufferPtr CachedReadBufferFromRemoteFS::getRemoteFSReadBuffer(FileSegmentPtr &, ReadType read_type_)
 {
     switch (read_type_)
     {
@@ -92,13 +92,13 @@ SeekableReadBufferPtr CachedReadBufferFromRemoteFS::getRemoteFSReadBuffer(FileSe
             * Implementation buffer from segment1 is passed to segment2 once segment1 is loaded.
             */
 
-            auto remote_fs_segment_reader = file_segment->getRemoteFileReader();
+            // auto remote_fs_segment_reader = file_segment->getRemoteFileReader();
 
-            if (remote_fs_segment_reader)
-                return remote_fs_segment_reader;
+            // if (remote_fs_segment_reader)
+            //     return remote_fs_segment_reader;
 
-            remote_fs_segment_reader = remote_file_reader_creator();
-            file_segment->setRemoteFileReader(remote_fs_segment_reader);
+            auto remote_fs_segment_reader = remote_file_reader_creator();
+            // file_segment->setRemoteFileReader(remote_fs_segment_reader);
 
             ///TODO: add check for pending data
             return remote_fs_segment_reader;
@@ -156,10 +156,12 @@ SeekableReadBufferPtr CachedReadBufferFromRemoteFS::getReadBufferForFileSegment(
                         /// requested_range:            [__________]
                         ///                             ^
                         ///                             file_offset_of_buffer_end
-                        assert(file_offset_of_buffer_end > file_segment->getDownloadOffset());
-                        bytes_to_predownload = file_offset_of_buffer_end - file_segment->getDownloadOffset();
+                        // assert(file_offset_of_buffer_end > file_segment->getDownloadOffset());
+                        // bytes_to_predownload = file_offset_of_buffer_end - file_segment->getDownloadOffset();
 
-                        read_type = ReadType::REMOTE_FS_READ_AND_PUT_IN_CACHE;
+                        // read_type = ReadType::REMOTE_FS_READ_AND_PUT_IN_CACHE;
+                        read_type = ReadType::REMOTE_FS_READ_BYPASS_CACHE;
+                        file_segment->resetDownloader();
                         return getRemoteFSReadBuffer(file_segment, read_type);
                     }
                 }
@@ -222,8 +224,12 @@ SeekableReadBufferPtr CachedReadBufferFromRemoteFS::getReadBufferForFileSegment(
                         ///                           ^
                         ///                           file_offset_of_buffer_end
 
-                        assert(file_offset_of_buffer_end > file_segment->getDownloadOffset());
-                        bytes_to_predownload = file_offset_of_buffer_end - file_segment->getDownloadOffset();
+                        // assert(file_offset_of_buffer_end > file_segment->getDownloadOffset());
+                        // bytes_to_predownload = file_offset_of_buffer_end - file_segment->getDownloadOffset();
+
+                        read_type = ReadType::REMOTE_FS_READ_BYPASS_CACHE;
+                        file_segment->resetDownloader();
+                        return getRemoteFSReadBuffer(file_segment, read_type);
                     }
 
                     download_offset = file_segment->getDownloadOffset();
@@ -406,12 +412,22 @@ void CachedReadBufferFromRemoteFS::predownload(FileSegmentPtr & file_segment)
             }
 
             size_t current_predownload_size = std::min(implementation_buffer->buffer().size(), bytes_to_predownload);
+            if (std::next(current_file_segment_it) == file_segments_holder->file_segments.end())
+            {
+                size_t remaining_size_to_read = std::min(file_segment->range().right, read_until_position - 1) - file_offset_of_buffer_end + 1;
+                current_predownload_size = std::min(current_predownload_size, remaining_size_to_read);
+            }
 
             if (file_segment->reserve(current_predownload_size))
             {
                 LOG_TEST(log, "Left to predownload: {}, buffer size: {}", bytes_to_predownload, implementation_buffer->buffer().size());
 
+                assert(file_segment->getDownloadOffset() == static_cast<size_t>(implementation_buffer->getPosition()));
+
                 file_segment->write(implementation_buffer->buffer().begin(), current_predownload_size, current_offset);
+
+                assert(file_segment->getDownloadOffset() <= file_segment->range().right + 1);
+
                 current_offset += current_predownload_size;
 
                 bytes_to_predownload -= current_predownload_size;
@@ -521,6 +537,7 @@ bool CachedReadBufferFromRemoteFS::nextImpl()
 {
     try
     {
+        last_caller_id = FileSegment::getCallerId();
         return nextImplStep();
     }
     catch (Exception & e)
@@ -632,13 +649,24 @@ bool CachedReadBufferFromRemoteFS::nextImplStep()
 
     if (result)
     {
+        if (std::next(current_file_segment_it) == file_segments_holder->file_segments.end())
+        {
+            size_t remaining_size_to_read = std::min(current_read_range.right, read_until_position - 1) - file_offset_of_buffer_end + 1;
+            size = std::min(size, remaining_size_to_read);
+            implementation_buffer->buffer().resize(nextimpl_working_buffer_offset + size);
+        }
+
         if (download_current_segment)
         {
             assert(file_offset_of_buffer_end + size - 1 <= file_segment->range().right);
 
             if (file_segment->reserve(size))
             {
+                assert(file_segment->getDownloadOffset() == static_cast<size_t>(implementation_buffer->getPosition()));
+
                 file_segment->write(needed_to_predownload ? implementation_buffer->position() : implementation_buffer->buffer().begin(), size, file_offset_of_buffer_end);
+
+                assert(file_segment->getDownloadOffset() <= file_segment->range().right + 1);
             }
             else
             {
@@ -666,13 +694,6 @@ bool CachedReadBufferFromRemoteFS::nextImplStep()
                 ProfileEvents::increment(ProfileEvents::RemoteFSCacheDownloadBytes, size);
                 break;
             }
-        }
-
-        if (std::next(current_file_segment_it) == file_segments_holder->file_segments.end())
-        {
-            size_t remaining_size_to_read = std::min(current_read_range.right, read_until_position - 1) - file_offset_of_buffer_end + 1;
-            size = std::min(size, remaining_size_to_read);
-            implementation_buffer->buffer().resize(nextimpl_working_buffer_offset + size);
         }
 
         file_offset_of_buffer_end += size;
@@ -777,12 +798,13 @@ String CachedReadBufferFromRemoteFS::getInfoForLog()
     auto current_file_segment_info = current_file_segment_it == file_segments_holder->file_segments.end() ? "None" : (*current_file_segment_it)->getInfoForLog();
 
     return fmt::format("Buffer path: {}, hash key: {}, file_offset_of_buffer_end: {}, internal buffer remaining read range: {}, "
-                       "read_type: {}, file segment info: {}",
+                       "read_type: {}, last caller: {}, file segment info: {}",
                        remote_fs_object_path,
                        getHexUIntLowercase(cache_key),
                        file_offset_of_buffer_end,
                        implementation_buffer_read_range_str,
                        toString(read_type),
+                       last_caller_id,
                        current_file_segment_info);
 }
 
