@@ -9,6 +9,7 @@
 #include <IO/Operators.h>
 #include <filesystem>
 
+namespace fs = std::filesystem;
 
 namespace CurrentMetrics
 {
@@ -225,6 +226,14 @@ void FileSegment::resetRemoteFileReader()
     remote_file_reader.reset();
 }
 
+String FileSegment::getCacheFileName() const
+{
+    auto path = cache->getPathInLocalCache(key(), offset(), is_persistent);
+    if (write_through_cache_download && !write_through_cache_download_finished)
+        path += ".tmp";
+    return path;
+}
+
 void FileSegment::write(const char * from, size_t size, size_t offset_, bool finalize)
 {
     if (!size)
@@ -263,7 +272,7 @@ void FileSegment::write(const char * from, size_t size, size_t offset_, bool fin
                             "Cache writer was finalized (downloaded size: {}, state: {})",
                             downloaded_size, stateToString(download_state));
 
-        auto download_path = cache->getPathInLocalCache(key(), offset(), is_persistent);
+        auto download_path = getCacheFileName();
         cache_writer = std::make_unique<WriteBufferFromFile>(download_path);
     }
 
@@ -504,7 +513,8 @@ void FileSegment::completeUnlocked(std::lock_guard<std::mutex> & cache_lock, std
 {
     bool is_last_holder = cache->isLastFileSegmentHolder(key(), offset(), cache_lock, segment_lock);
 
-    if (is_last_holder && download_state == State::SKIP_CACHE)
+    if ((is_last_holder && download_state == State::SKIP_CACHE)
+        || (write_through_cache_download && !write_through_cache_download_finished))
     {
         cache->remove(key(), offset(), cache_lock, segment_lock);
         return;
@@ -650,7 +660,7 @@ void FileSegment::assertCorrectnessImpl(std::lock_guard<std::mutex> & /* segment
 {
     assert(downloader_id.empty() == (download_state != FileSegment::State::DOWNLOADING));
     assert(!downloader_id.empty() == (download_state == FileSegment::State::DOWNLOADING));
-    assert(download_state != FileSegment::State::DOWNLOADED || std::filesystem::file_size(cache->getPathInLocalCache(key(), offset(), is_persistent)) > 0);
+    assert(download_state != FileSegment::State::DOWNLOADED || fs::file_size(getCacheFileName()) > 0);
 }
 
 void FileSegment::throwIfDetached() const
@@ -894,12 +904,38 @@ bool FileSegmentRangeWriter::write(char * data, size_t size, size_t offset, bool
     return true;
 }
 
-void FileSegmentRangeWriter::finalize()
+void FileSegmentRangeWriter::finalize(bool success)
 {
     if (finalized)
         return;
 
     auto & file_segments = file_segments_holder.file_segments;
+    for (auto it = file_segments.begin(); it != current_file_segment_it;)
+    {
+        auto & file_segment = *it;
+
+        auto cache_file_path = file_segment->getCacheFileName();
+        bool is_tmp_file = cache_file_path.ends_with(".tmp");
+        assert(is_tmp_file);
+
+        if (fs::exists(cache_file_path))
+        {
+            if (success)
+            {
+                auto new_cache_file_path = cache_file_path.substr();
+                auto non_tmp_path = cache_file_path.substr(0, cache_file_path.size() + 1 - sizeof(".tmp");
+                fs::rename(cache_file_path, non_tmp_path));
+            }
+            else
+            {
+                fs::remove(cache_file_path);
+            }
+        }
+        file_segment->write_through_cache_download_finished = true;
+        file_segment->write_through_cache_download = false;
+        it = file_segments.erase(it);
+    }
+
     if (file_segments.empty() || current_file_segment_it == file_segments.end())
         return;
 

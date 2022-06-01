@@ -136,7 +136,7 @@ public:
     void preFinalize() override
     {
         if (cache_writer)
-            cache_writer->finalize();
+            cache_writer->finalize(true);
     }
 
 private:
@@ -405,7 +405,7 @@ void DiskCache::removeSharedFiles(
 void DiskCache::removeSharedRecursive(
     const String & path, bool keep_all_batch_data, const NameSet & file_names_remove_metadata_only)
 {
-    removeCacheIfExists(path);
+    removeCacheIfExistsRecursive(path);
     DiskDecorator::removeSharedRecursive(path, keep_all_batch_data, file_names_remove_metadata_only);
 }
 

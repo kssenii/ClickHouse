@@ -50,11 +50,13 @@ void LRUFileCache::useCell(
 {
     auto file_segment = cell.file_segment;
 
-    if (file_segment->isDownloaded()
-        && fs::file_size(getPathInLocalCache(file_segment->key(), file_segment->offset(), file_segment->isPersistent())) == 0)
-        throw Exception(ErrorCodes::LOGICAL_ERROR,
-                        "Cannot have zero size downloaded file segments. Current file segment: {}",
-                        file_segment->range().toString());
+    if (file_segment->isDownloaded() && fs::file_size(file_segment->getCacheFileName()) == 0)
+    {
+        throw Exception(
+            ErrorCodes::LOGICAL_ERROR,
+            "Cannot have zero size downloaded file segments. Current file segment: {}",
+            file_segment->range().toString());
+    }
 
     result.push_back(cell.file_segment);
 
@@ -605,8 +607,40 @@ void LRUFileCache::removeIfExists(const Key & key)
 
     files.erase(key);
 
-    if (fs::exists(key_path))
-        fs::remove(key_path);
+    fs::path fs_key_path{key_path};
+    if (fs::exists(fs_key_path))
+    {
+        if (fs_key_path.empty())
+        {
+            fs::remove(key_path);
+        }
+        else
+        {
+            String paths;
+            fs::directory_iterator path_it{key_path};
+
+            for (; path_it != fs::directory_iterator(); ++path_it)
+            {
+                if (!paths.empty())
+                    paths += ", ";
+                paths += path_it->path().filename();
+            }
+
+#ifdef NDEBUG
+            LOG_WARNING(
+                log,
+                "Key {} has non empty files on directory ({}) removal. The following files will be manually removed: {}",
+                key.toString(), key_path, paths);
+
+            fs::remove_all(key_path);
+#else
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Key {} has non empty files on directory ({}) removal. The following files will be manually removed: {}",
+                key.toString(), key_path, paths);
+#endif
+        }
+    }
 }
 
 void LRUFileCache::removeIfReleasable(bool remove_persistent_files)
@@ -660,7 +694,7 @@ void LRUFileCache::remove(
     if (!cell)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "No cache cell for key: {}, offset: {}", key.toString(), offset);
 
-    bool is_persistent_file_segment = cell->file_segment->isPersistent();
+    auto cache_file_path = cell->file_segment->getCacheFileName();
 
     if (cell->queue_iterator)
     {
@@ -670,7 +704,6 @@ void LRUFileCache::remove(
     auto & offsets = files[key];
     offsets.erase(offset);
 
-    auto cache_file_path = getPathInLocalCache(key, offset, is_persistent_file_segment);
     if (fs::exists(cache_file_path))
     {
         try
@@ -720,6 +753,14 @@ void LRUFileCache::loadCacheInfoIntoMemory(std::lock_guard<std::mutex> & cache_l
             for (; offset_it != fs::directory_iterator(); ++offset_it)
             {
                 auto offset_with_suffix = offset_it->path().filename().string();
+                std::cerr << "\nhaving in cache: " << offset_with_suffix << "\n";
+
+                if (offset_with_suffix.ends_with(".tmp"))
+                {
+                    fs::remove(offset_it->path());
+                    continue;
+                }
+
                 auto delim_pos = offset_with_suffix.find('_');
                 bool parsed;
                 bool is_persistent = false;
@@ -819,7 +860,7 @@ std::vector<String> LRUFileCache::tryGetCachePaths(const Key & key)
     for (const auto & [offset, cell] : cells_by_offset)
     {
         if (cell.file_segment->state() == FileSegment::State::DOWNLOADED)
-            cache_paths.push_back(getPathInLocalCache(key, offset, cell.file_segment->isPersistent()));
+            cache_paths.push_back(cell.file_segment->getCacheFileName());
     }
 
     return cache_paths;

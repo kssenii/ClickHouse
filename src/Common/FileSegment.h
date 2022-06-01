@@ -163,6 +163,7 @@ private:
     String getInfoForLogImpl(std::lock_guard<std::mutex> & segment_lock) const;
     void assertCorrectnessImpl(std::lock_guard<std::mutex> & segment_lock) const;
     bool hasFinalizedState() const;
+    String getCacheFileName() const;
 
     bool isDetached(std::lock_guard<std::mutex> & /* segment_lock */) const { return is_detached; }
     void markAsDetached(std::lock_guard<std::mutex> & segment_lock);
@@ -233,7 +234,9 @@ private:
     std::atomic<size_t> ref_count = 0; /// Used for getting snapshot state
 
     bool is_persistent;
+
     bool write_through_cache_download = false;
+    bool write_through_cache_download_finished = false;
 
     CurrentMetrics::Increment metric_increment{CurrentMetrics::CacheFileSegments};
 };
@@ -278,7 +281,7 @@ public:
 
     bool write(char * data, size_t size, size_t offset, bool is_persistent);
 
-    void finalize();
+    void finalize(bool success);
 
     /// If exception happened on remote fs write, we consider current cache invalid.
     void clear();
