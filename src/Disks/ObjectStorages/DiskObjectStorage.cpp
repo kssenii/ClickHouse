@@ -1,4 +1,5 @@
 #include <Disks/ObjectStorages/DiskObjectStorage.h>
+#include <Disks/ObjectStorages/DiskObjectStorageCommon.h>
 
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadBufferFromFile.h>
@@ -9,7 +10,6 @@
 #include <Common/quoteString.h>
 #include <Common/logger_useful.h>
 #include <Common/checkStackSize.h>
-#include <Common/getRandomASCIIString.h>
 #include <boost/algorithm/string.hpp>
 #include <Common/filesystemHelpers.h>
 #include <Disks/IO/ThreadPoolRemoteFSReader.h>
@@ -89,43 +89,43 @@ DiskTransactionPtr DiskObjectStorage::createObjectStorageTransaction()
     return std::make_shared<DiskObjectStorageTransaction>(
         *object_storage,
         *metadata_storage,
-        remote_fs_root_path,
         send_metadata ? metadata_helper.get() : nullptr);
 }
 
 DiskObjectStorage::DiskObjectStorage(
     const String & name_,
-    const String & remote_fs_root_path_,
+    const String & object_storage_root_path_,
     const String & log_name,
-    MetadataStoragePtr && metadata_storage_,
-    ObjectStoragePtr && object_storage_,
+    MetadataStoragePtr metadata_storage_,
+    ObjectStoragePtr object_storage_,
     DiskType disk_type_,
     bool send_metadata_,
-    uint64_t thread_pool_size)
-    : IDisk(std::make_unique<AsyncThreadPoolExecutor>(log_name, thread_pool_size))
+    uint64_t thread_pool_size_)
+    : IDisk(std::make_unique<AsyncThreadPoolExecutor>(log_name, thread_pool_size_))
     , name(name_)
-    , remote_fs_root_path(remote_fs_root_path_)
-    , log (&Poco::Logger::get(log_name))
+    , object_storage_root_path(object_storage_root_path_)
+    , log (&Poco::Logger::get("DiskObjectStorage(" + log_name + ")"))
     , disk_type(disk_type_)
     , metadata_storage(std::move(metadata_storage_))
     , object_storage(std::move(object_storage_))
     , send_metadata(send_metadata_)
+    , threadpool_size(thread_pool_size_)
     , metadata_helper(std::make_unique<DiskObjectStorageRemoteMetadataRestoreHelper>(this, ReadSettings{}))
 {}
 
-PathsWithSize DiskObjectStorage::getObjectStoragePaths(const String & local_path) const
+StoredObjects DiskObjectStorage::getStorageObjects(const String & local_path) const
 {
-    return metadata_storage->getObjectStoragePaths(local_path);
+    return metadata_storage->getStorageObjects(local_path);
 }
 
-void DiskObjectStorage::getRemotePathsRecursive(const String & local_path, std::vector<LocalPathWithRemotePaths> & paths_map)
+void DiskObjectStorage::getRemotePathsRecursive(const String & local_path, std::vector<LocalPathWithObjectStoragePaths> & paths_map)
 {
     /// Protect against concurrent delition of files (for example because of a merge).
     if (metadata_storage->isFile(local_path))
     {
         try
         {
-            paths_map.emplace_back(local_path, getObjectStoragePaths(local_path));
+            paths_map.emplace_back(local_path, getStorageObjects(local_path));
         }
         catch (const Exception & e)
         {
@@ -247,9 +247,9 @@ std::unordered_map<String, String> DiskObjectStorage::getSerializedMetadata(cons
 
 String DiskObjectStorage::getUniqueId(const String & path) const
 {
-    LOG_TRACE(log, "Remote path: {}, Path: {}", remote_fs_root_path, path);
+    LOG_TRACE(log, "Remote path: {}, Path: {}", object_storage_root_path, path);
     String id;
-    auto blobs_paths = metadata_storage->getObjectStoragePaths(path);
+    auto blobs_paths = metadata_storage->getStorageObjects(path);
     if (!blobs_paths.empty())
         id = blobs_paths[0].path;
     return id;
@@ -257,10 +257,10 @@ String DiskObjectStorage::getUniqueId(const String & path) const
 
 bool DiskObjectStorage::checkObjectExists(const String & path) const
 {
-    if (!path.starts_with(remote_fs_root_path))
+    if (!path.starts_with(object_storage_root_path))
         return false;
 
-    return object_storage->exists(path);
+    return object_storage->exists(StoredObject{path});
 }
 
 bool DiskObjectStorage::checkUniqueId(const String & id) const
@@ -437,6 +437,24 @@ std::optional<UInt64> DiskObjectStorage::tryReserve(UInt64 bytes)
     return {};
 }
 
+bool DiskObjectStorage::isCached() const
+{
+    return object_storage->isCached();
+}
+
+DiskObjectStoragePtr DiskObjectStorage::getObjectStorage(const String & name_)
+{
+    return std::make_shared<DiskObjectStorage>(
+        name_,
+        object_storage_root_path,
+        name,
+        metadata_storage,
+        object_storage,
+        disk_type,
+        send_metadata,
+        threadpool_size);
+}
+
 std::unique_ptr<ReadBufferFromFileBase> DiskObjectStorage::readFile(
     const String & path,
     const ReadSettings & settings,
@@ -444,7 +462,7 @@ std::unique_ptr<ReadBufferFromFileBase> DiskObjectStorage::readFile(
     std::optional<size_t> file_size) const
 {
     return object_storage->readObjects(
-        metadata_storage->getObjectStoragePaths(path),
+        metadata_storage->getStorageObjects(path),
         settings,
         read_hint,
         file_size);
@@ -456,8 +474,11 @@ std::unique_ptr<WriteBufferFromFileBase> DiskObjectStorage::writeFile(
     WriteMode mode,
     const WriteSettings & settings)
 {
+    LOG_TEST(log, "Write file: {}", path);
+
     auto transaction = createObjectStorageTransaction();
-    auto result = transaction->writeFile(path, buf_size, mode, settings);
+    auto result = transaction->writeFile(
+        path, buf_size, mode, settings);
 
     return result;
 }
@@ -477,7 +498,8 @@ void DiskObjectStorage::restoreMetadataIfNeeded(const Poco::Util::AbstractConfig
     {
         metadata_helper->restore(config, config_prefix, context);
 
-        if (metadata_helper->readSchemaVersion(object_storage.get(), remote_fs_root_path) < DiskObjectStorageRemoteMetadataRestoreHelper::RESTORABLE_SCHEMA_VERSION)
+        auto current_schema_version = metadata_helper->readSchemaVersion(object_storage.get(), object_storage_root_path);
+        if (current_schema_version < DiskObjectStorageRemoteMetadataRestoreHelper::RESTORABLE_SCHEMA_VERSION)
             metadata_helper->migrateToRestorableSchema();
 
         metadata_helper->findLastRevision();

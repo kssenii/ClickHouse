@@ -1,39 +1,21 @@
 #pragma once
 
 #include <Disks/ObjectStorages/IMetadataStorage.h>
+#include <Disks/ObjectStorages/MetadataStorageFromDiskTransaction.h>
+#include <Disks/ObjectStorages/MetadataStorageFromLocalDisk.h>
 
-#include <Disks/IDisk.h>
-#include <Disks/ObjectStorages/DiskObjectStorageMetadata.h>
-#include "MetadataStorageFromDiskTransactionOperations.h"
 
 namespace DB
 {
 
-enum class MetadataFromDiskTransactionState
+class MetadataStorageFromLocalDisk : public IMetadataStorage
 {
-    PREPARING,
-    FAILED,
-    COMMITTED,
-    PARTIALLY_ROLLED_BACK,
-};
-
-std::string toString(MetadataFromDiskTransactionState state);
-
-class MetadataStorageFromDisk final : public IMetadataStorage
-{
-private:
-    friend struct MetadataStorageFromDiskTransaction;
-
-    DiskPtr disk;
-    std::string root_path_for_remote_metadata;
-    mutable std::shared_mutex metadata_mutex;
 
 public:
-    MetadataStorageFromDisk(DiskPtr disk_, const std::string & root_path_from_remote_metadata_)
-        : disk(disk_)
-        , root_path_for_remote_metadata(root_path_from_remote_metadata_)
-    {
-    }
+    explicit MetadataStorageFromLocalDisk(
+        DiskPtr disk_,
+        ObjectStoragePtr object_storage_,
+        const std::string & object_storage_root_path_);
 
     MetadataTransactionPtr createTransaction() const override;
 
@@ -59,38 +41,30 @@ public:
 
     std::unordered_map<String, String> getSerializedMetadata(const std::vector<String> & file_paths) const override;
 
-    PathsWithSize getObjectStoragePaths(const std::string & path) const override;
-
     uint32_t getHardlinkCount(const std::string & path) const override;
 
+    DiskPtr getDisk() const override { return disk; }
+
+    StoredObjects getStorageObjects(const std::string & path) const override;
+
+    StoredObject createStorageObject(const std::string & blob_name) const override;
 
 private:
-    DiskObjectStorageMetadataPtr readMetadata(const std::string & path) const;
-    DiskObjectStorageMetadataPtr readMetadataUnlocked(const std::string & path, std::shared_lock<std::shared_mutex> & lock) const;
+    DiskPtr disk;
+    ObjectStoragePtr object_storage;
+    std::string object_storage_root_path;
 };
 
-struct MetadataStorageFromDiskTransaction final : public IMetadataTransaction
+class MetadataStorageFromLocalDiskTransaction final : public MetadataStorageFromDiskTransaction
 {
 private:
-    const MetadataStorageFromDisk & metadata_storage;
-
-    std::vector<MetadataOperationPtr> operations;
-    MetadataFromDiskTransactionState state{MetadataFromDiskTransactionState::PREPARING};
-
-    void addOperation(MetadataOperationPtr && operation);
-    void rollback(size_t until_pos);
+    DiskPtr disk;
 
 public:
-    explicit MetadataStorageFromDiskTransaction(const MetadataStorageFromDisk & metadata_storage_)
-        : metadata_storage(metadata_storage_)
+    explicit MetadataStorageFromLocalDiskTransaction(const MetadataStorageFromLocalDisk & metadata_storage_, DiskPtr disk_)
+        : MetadataStorageFromDiskTransaction(metadata_storage_)
+        , disk(disk_)
     {}
-
-    const IMetadataStorage & getStorageForNonTransactionalReads() const override
-    {
-        return metadata_storage;
-    }
-
-    void commit() override;
 
     void writeStringToFile(const std::string & path, const std::string & data) override;
 
@@ -123,9 +97,6 @@ public:
     void replaceFile(const std::string & path_from, const std::string & path_to) override;
 
     void unlinkMetadata(const std::string & path) override;
-
-    ~MetadataStorageFromDiskTransaction() override = default;
 };
-
 
 }

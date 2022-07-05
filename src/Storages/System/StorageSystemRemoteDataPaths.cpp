@@ -51,7 +51,7 @@ Pipe StorageSystemRemoteDataPaths::read(
     {
         if (disk->isRemote())
         {
-            std::vector<IDisk::LocalPathWithRemotePaths> remote_paths_by_local_path;
+            std::vector<IDisk::LocalPathWithObjectStoragePaths> remote_paths_by_local_path;
             disk->getRemotePathsRecursive("store", remote_paths_by_local_path);
             disk->getRemotePathsRecursive("data", remote_paths_by_local_path);
 
