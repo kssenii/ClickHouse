@@ -99,39 +99,39 @@ StoredObjects MetadataStorageFromLocalDisk::getStorageObjects(const std::string 
 
 StoredObject MetadataStorageFromLocalDisk::createStorageObject(const std::string & blob_name) const
 {
-    auto blob_path = fs::path(object_storage_root_path) / blob_name;
     StoredObject::CacheHintCreator cache_hint_creator;
+    String full_path = fs::path(object_storage_root_path);
     size_t object_size = 0;
 
-    if (exists(blob_path))
+    if (exists(full_path))
     {
-        object_size = getFileSize(blob_path);
-        cache_hint_creator = [cache_hint = toString(getINodeNumberFromPath(blob_path))](const String &)
+        object_size = getFileSize(full_path);
+        cache_hint_creator = [cache_hint = toString(getINodeNumberFromPath(full_path))](const String &)
         {
             return cache_hint;
         };
     }
     else
     {
-        cache_hint_creator = [](const String & blob_path_) -> String
+        cache_hint_creator = [](const String & path) -> String
         {
             try
             {
-                return toString(getINodeNumberFromPath(blob_path_));
+                return toString(getINodeNumberFromPath(path));
             }
             catch (...)
             {
                 LOG_DEBUG(
                     &Poco::Logger::get("MetadataStorageFromLocalDisk"),
                     "Object does not exist while getting cache path hint (object path: {})",
-                    blob_path_);
+                    path);
 
                 return "";
             }
         };
     }
 
-    return StoredObject{blob_path, object_size, std::move(cache_hint_creator)};
+    return StoredObject(object_storage_root_path, blob_name, object_size, std::move(cache_hint_creator));
 }
 
 uint32_t MetadataStorageFromLocalDisk::getHardlinkCount(const std::string & path) const

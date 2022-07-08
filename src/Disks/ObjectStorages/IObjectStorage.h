@@ -14,6 +14,7 @@
 #include <Disks/IO/AsynchronousReadIndirectBufferFromRemoteFS.h>
 #include <Common/ThreadPool.h>
 #include <Disks/WriteMode.h>
+#include <Disks/ObjectStorages/StoredObject.h>
 
 
 namespace DB
@@ -36,27 +37,6 @@ struct RelativePathWithSize
 };
 using RelativePathsWithSize = std::vector<RelativePathWithSize>;
 
-
-/// Object metadata: path, size. cache_hint.
-struct StoredObject
-{
-    std::string path; /// absolute
-    uint64_t bytes_size;
-
-    /// Optional cache hint for cache. Use delayed initialization
-    /// because somecache hint implementation requires it.
-    using CacheHintCreator = std::function<std::string(const std::string &)>;
-    CacheHintCreator cache_hint_creator;
-
-    StoredObject() = default;
-
-    explicit StoredObject(
-        const std::string & path_, uint64_t bytes_size_ = 0, CacheHintCreator && cache_hint_creator_ = {});
-
-    std::string getCacheHint() const;
-};
-
-using StoredObjects = std::vector<StoredObject>;
 
 struct ObjectMetadata
 {
@@ -141,7 +121,7 @@ public:
     virtual ~IObjectStorage() = default;
 
     /// Path to directory with objects cache
-    virtual const std::string & getCacheBasePath() const;
+    virtual std::string getCacheBasePath() const;
 
     static AsynchronousReaderPtr getThreadPoolReader();
 

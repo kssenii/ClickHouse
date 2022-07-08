@@ -32,7 +32,7 @@ LocalObjectStorage::LocalObjectStorage()
 
 bool LocalObjectStorage::exists(const StoredObject & object) const
 {
-    return fs::exists(object.path);
+    return fs::exists(object.getFullPath());
 }
 
 std::unique_ptr<ReadBufferFromFileBase> LocalObjectStorage::readObjects( /// NOLINT
@@ -53,7 +53,7 @@ std::unique_ptr<ReadBufferFromFileBase> LocalObjectStorage::readObject( /// NOLI
     std::optional<size_t> read_hint,
     std::optional<size_t> file_size) const
 {
-    const auto & path = object.path;
+    const auto & path = object.getFullPath();
 
     if (!file_size.has_value())
         file_size = getFileSizeIfPossible(path);
@@ -73,7 +73,7 @@ std::unique_ptr<WriteBufferFromFileBase> LocalObjectStorage::writeObject( /// NO
     size_t buf_size,
     const WriteSettings & /* write_settings */)
 {
-    const auto & path = object.path;
+    const auto & path = object.getFullPath();
     int flags = (mode == WriteMode::Append) ? (O_APPEND | O_CREAT | O_WRONLY) : -1;
     LOG_TEST(log, "Write object: {}", path);
     return std::make_unique<WriteBufferFromFile>(path, buf_size, flags);
@@ -92,9 +92,9 @@ void LocalObjectStorage::removeObject(const StoredObject & object)
     if (!exists(object))
         return;
 
-    auto fs_path = fs::path(object.path) / object.path;
-    if (0 != unlink(fs_path.c_str()))
-        throwFromErrnoWithPath("Cannot unlink file " + fs_path.string(), fs_path, ErrorCodes::CANNOT_UNLINK);
+    auto path = object.getFullPath();
+    if (0 != unlink(path.data()))
+        throwFromErrnoWithPath("Cannot unlink file " + path, path, ErrorCodes::CANNOT_UNLINK);
 }
 
 void LocalObjectStorage::removeObjects(const StoredObjects & objects)
@@ -123,10 +123,11 @@ ObjectMetadata LocalObjectStorage::getObjectMetadata(const std::string & /* path
 void LocalObjectStorage::copyObject( // NOLINT
     const StoredObject & object_from, const StoredObject & object_to, std::optional<ObjectAttributes> /* object_to_attributes */)
 {
-    fs::path to = object_to.path;
-    fs::path from = object_from.path;
+    fs::path to = object_to.getFullPath();
+    fs::path from = object_from.getFullPath();
 
-    if (object_from.path.ends_with('/'))
+    /// Same behaviour as in DiskLocal.
+    if (from.string().ends_with('/'))
         from = from.parent_path();
     if (fs::is_directory(from))
         to /= from.filename();

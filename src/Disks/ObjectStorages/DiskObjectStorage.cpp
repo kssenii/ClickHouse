@@ -251,21 +251,20 @@ String DiskObjectStorage::getUniqueId(const String & path) const
     String id;
     auto blobs_paths = metadata_storage->getStorageObjects(path);
     if (!blobs_paths.empty())
-        id = blobs_paths[0].path;
+        id = blobs_paths[0].getFullPath();
     return id;
-}
-
-bool DiskObjectStorage::checkObjectExists(const String & path) const
-{
-    if (!path.starts_with(object_storage_root_path))
-        return false;
-
-    return object_storage->exists(StoredObject{path});
 }
 
 bool DiskObjectStorage::checkUniqueId(const String & id) const
 {
-    return checkObjectExists(id);
+    /// FIXME: Why do we need this check?
+    if (!id.starts_with(object_storage_root_path))
+        return false;
+
+    /// Here path starts with object_storage_root_path and we pass it as relative_path argument.
+    /// This is expected.
+    StoredObject object(object_storage_root_path, id);
+    return object_storage->exists(std::move(object));
 }
 
 void DiskObjectStorage::createHardLink(const String & src_path, const String & dst_path, bool should_send_metadata)
@@ -394,7 +393,8 @@ ReservationPtr DiskObjectStorage::reserve(UInt64 bytes)
     if (!tryReserve(bytes))
         return {};
 
-    return std::make_unique<DiskObjectStorageReservation>(std::static_pointer_cast<DiskObjectStorage>(shared_from_this()), bytes);
+    return std::make_unique<DiskObjectStorageReservation>(
+        std::static_pointer_cast<DiskObjectStorage>(shared_from_this()), bytes);
 }
 
 void DiskObjectStorage::removeSharedFileIfExists(const String & path, bool delete_metadata_only)
@@ -404,7 +404,8 @@ void DiskObjectStorage::removeSharedFileIfExists(const String & path, bool delet
     transaction->commit();
 }
 
-void DiskObjectStorage::removeSharedRecursive(const String & path, bool keep_all_batch_data, const NameSet & file_names_remove_metadata_only)
+void DiskObjectStorage::removeSharedRecursive(
+    const String & path, bool keep_all_batch_data, const NameSet & file_names_remove_metadata_only)
 {
     auto transaction = createObjectStorageTransaction();
     transaction->removeSharedRecursive(path, keep_all_batch_data, file_names_remove_metadata_only);
@@ -483,7 +484,8 @@ std::unique_ptr<WriteBufferFromFileBase> DiskObjectStorage::writeFile(
     return result;
 }
 
-void DiskObjectStorage::applyNewSettings(const Poco::Util::AbstractConfiguration & config, ContextPtr context_, const String &, const DisksMap &)
+void DiskObjectStorage::applyNewSettings(
+    const Poco::Util::AbstractConfiguration & config, ContextPtr context_, const String &, const DisksMap &)
 {
     const auto config_prefix = "storage_configuration.disks." + name;
     object_storage->applyNewSettings(config, config_prefix, context_);
@@ -492,7 +494,8 @@ void DiskObjectStorage::applyNewSettings(const Poco::Util::AbstractConfiguration
         exec->setMaxThreads(config.getInt(config_prefix + ".thread_pool_size", 16));
 }
 
-void DiskObjectStorage::restoreMetadataIfNeeded(const Poco::Util::AbstractConfiguration & config, const std::string & config_prefix, ContextPtr context)
+void DiskObjectStorage::restoreMetadataIfNeeded(
+    const Poco::Util::AbstractConfiguration & config, const std::string & config_prefix, ContextPtr context)
 {
     if (send_metadata)
     {

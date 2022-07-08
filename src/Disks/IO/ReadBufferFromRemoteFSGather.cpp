@@ -33,29 +33,29 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-SeekableReadBufferPtr ReadBufferFromRemoteFSGather::createImplementationBuffer(const String & path, size_t file_size)
+SeekableReadBufferPtr ReadBufferFromRemoteFSGather::createImplementationBuffer(const StoredObject & object)
 {
     if (!current_file_path.empty() && !with_cache && enable_cache_log)
     {
         appendFilesystemCacheLog();
     }
 
-    current_file_path = path;
-    current_file_size = file_size;
+    current_file_path = object.getFullPath();
+    current_file_size = object.bytes_size;
     total_bytes_read_from_current_file = 0;
 
-    return createImplementationBufferImpl(path, file_size);
+    return createImplementationBufferImpl(object);
 }
 
 #if USE_AWS_S3
-SeekableReadBufferPtr ReadBufferFromS3Gather::createImplementationBufferImpl(const String & path, size_t file_size)
+SeekableReadBufferPtr ReadBufferFromS3Gather::createImplementationBufferImpl(const StoredObject & object)
 {
     auto remote_file_reader_creator = [=, this]()
     {
         return std::make_unique<ReadBufferFromS3>(
             client_ptr,
             bucket,
-            path,
+            object.getFullPath(),
             version_id,
             max_single_read_retries,
             settings,
@@ -68,12 +68,12 @@ SeekableReadBufferPtr ReadBufferFromS3Gather::createImplementationBufferImpl(con
     if (with_cache)
     {
         return std::make_shared<CachedReadBufferFromRemoteFS>(
-            path,
+            object.getFullPath(),
             settings.remote_fs_cache,
             remote_file_reader_creator,
             settings,
             query_id,
-            read_until_position ? read_until_position : file_size);
+            read_until_position ? read_until_position : object.bytes_size);
     }
 
     return remote_file_reader_creator();
@@ -82,11 +82,11 @@ SeekableReadBufferPtr ReadBufferFromS3Gather::createImplementationBufferImpl(con
 
 
 #if USE_AZURE_BLOB_STORAGE
-SeekableReadBufferPtr ReadBufferFromAzureBlobStorageGather::createImplementationBufferImpl(const String & path, size_t /* file_size */)
+SeekableReadBufferPtr ReadBufferFromAzureBlobStorageGather::createImplementationBufferImpl(const StoredObject & object)
 {
     return std::make_unique<ReadBufferFromAzureBlobStorage>(
         blob_container_client,
-        path,
+        object.getRelativePath(),
         settings,
         max_single_read_retries,
         max_single_download_retries,
@@ -97,10 +97,10 @@ SeekableReadBufferPtr ReadBufferFromAzureBlobStorageGather::createImplementation
 #endif
 
 
-SeekableReadBufferPtr ReadBufferFromWebServerGather::createImplementationBufferImpl(const String & path, size_t /* file_size */)
+SeekableReadBufferPtr ReadBufferFromWebServerGather::createImplementationBufferImpl(const StoredObject & object)
 {
     return std::make_unique<ReadBufferFromWebServer>(
-        fs::path(uri) / path,
+        object.getFullPath(),
         context,
         settings,
         /* use_external_buffer */true,
@@ -109,8 +109,9 @@ SeekableReadBufferPtr ReadBufferFromWebServerGather::createImplementationBufferI
 
 
 #if USE_HDFS
-SeekableReadBufferPtr ReadBufferFromHDFSGather::createImplementationBufferImpl(const String & path, size_t /* file_size */)
+SeekableReadBufferPtr ReadBufferFromHDFSGather::createImplementationBufferImpl(const StoredObject & object)
 {
+    auto path = object.getFullPath();
     size_t begin_of_path = path.find('/', path.find("//") + 2);
     auto hdfs_path = path.substr(begin_of_path);
     auto hdfs_uri = path.substr(0, begin_of_path);
@@ -122,16 +123,16 @@ SeekableReadBufferPtr ReadBufferFromHDFSGather::createImplementationBufferImpl(c
 
 
 ReadBufferFromRemoteFSGather::ReadBufferFromRemoteFSGather(
-    const StoredObjects & blobs_to_read_,
+    const StoredObjects & objects_to_read_,
     const ReadSettings & settings_)
     : ReadBuffer(nullptr, 0)
-    , blobs_to_read(blobs_to_read_)
+    , objects_to_read(objects_to_read_)
     , settings(settings_)
     , query_id(CurrentThread::isInitialized() && CurrentThread::get().getQueryContext() != nullptr ? CurrentThread::getQueryId() : "")
     , log(&Poco::Logger::get("ReadBufferFromRemoteFSGather"))
     , enable_cache_log(!query_id.empty() && settings.enable_filesystem_cache_log)
 {
-    if (blobs_to_read.empty())
+    if (objects_to_read.empty())
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Attempt to read zero number of objects");
 
     with_cache = settings.remote_fs_cache
@@ -184,9 +185,10 @@ void ReadBufferFromRemoteFSGather::initialize()
 {
     /// One clickhouse file can be split into multiple files in remote fs.
     auto current_buf_offset = file_offset_of_buffer_end;
-    for (size_t i = 0; i < blobs_to_read.size(); ++i)
+    for (size_t i = 0; i < objects_to_read.size(); ++i)
     {
-        const auto & [file_path, size, _] = blobs_to_read[i];
+        const auto & object = objects_to_read[i];
+        size_t size = object.bytes_size;
 
         if (size > current_buf_offset)
         {
@@ -194,7 +196,7 @@ void ReadBufferFromRemoteFSGather::initialize()
             if (!current_buf || current_buf_idx != i)
             {
                 current_buf_idx = i;
-                current_buf = createImplementationBuffer(file_path, size);
+                current_buf = createImplementationBuffer(object);
             }
 
             current_buf->seek(current_buf_offset, SEEK_SET);
@@ -203,7 +205,7 @@ void ReadBufferFromRemoteFSGather::initialize()
 
         current_buf_offset -= size;
     }
-    current_buf_idx = blobs_to_read.size();
+    current_buf_idx = objects_to_read.size();
     current_buf = nullptr;
 }
 
@@ -237,13 +239,13 @@ bool ReadBufferFromRemoteFSGather::nextImpl()
 bool ReadBufferFromRemoteFSGather::moveToNextBuffer()
 {
     /// If there is no available buffers - nothing to read.
-    if (current_buf_idx + 1 >= blobs_to_read.size())
+    if (current_buf_idx + 1 >= objects_to_read.size())
         return false;
 
     ++current_buf_idx;
 
-    const auto & [path, size, _] = blobs_to_read[current_buf_idx];
-    current_buf = createImplementationBuffer(path, size);
+    const auto & object = objects_to_read[current_buf_idx];
+    current_buf = createImplementationBuffer(object);
 
     return true;
 }
@@ -272,7 +274,7 @@ bool ReadBufferFromRemoteFSGather::readImpl()
     if (!result)
         result = current_buf->next();
 
-    if (blobs_to_read.size() == 1)
+    if (objects_to_read.size() == 1)
     {
         file_offset_of_buffer_end = current_buf->getFileOffsetOfBufferEnd();
     }
@@ -326,7 +328,7 @@ String ReadBufferFromRemoteFSGather::getFileName() const
 size_t ReadBufferFromRemoteFSGather::getFileSize() const
 {
     size_t size = 0;
-    for (const auto & object : blobs_to_read)
+    for (const auto & object : objects_to_read)
         size += object.bytes_size;
     return size;
 }

@@ -128,9 +128,11 @@ StoredObjects MetadataStorageFromRemoteDisk::getStorageObjects(const std::string
     /// Relative paths -> absolute.
     for (auto & [object_relative_path, size] : object_storage_relative_paths)
     {
-        auto object_path = fs::path(metadata->getBlobsCommonPrefix()) / object_relative_path;
-        StoredObject object{ object_path, size, [](const String & path_){ return path_; }};
-        object_storage_paths.push_back(object);
+        object_storage_paths.emplace_back(
+            metadata->getBlobsCommonPrefix(),
+            object_relative_path,
+            size,
+            [](const String & path_){ return path_; });
     }
 
     return object_storage_paths;
@@ -138,8 +140,7 @@ StoredObjects MetadataStorageFromRemoteDisk::getStorageObjects(const std::string
 
 StoredObject MetadataStorageFromRemoteDisk::createStorageObject(const std::string & blob_name) const
 {
-    auto object_path = fs::path(object_storage_root_path) / blob_name;
-    return StoredObject{ object_path, 0, [](const String & path){ return path; }};
+    return StoredObject(object_storage_root_path, blob_name, 0, [](const String & path){ return path; });
 }
 
 uint32_t MetadataStorageFromRemoteDisk::getHardlinkCount(const std::string & path) const

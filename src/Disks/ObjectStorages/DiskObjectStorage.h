@@ -55,7 +55,7 @@ public:
 
     void getRemotePathsRecursive(const String & local_path, std::vector<LocalPathWithObjectStoragePaths> & paths_map) override;
 
-    const std::string & getCacheBasePath() const override
+    std::string getCacheBasePath() const override
     {
         return object_storage->getCacheBasePath();
     }
@@ -105,7 +105,6 @@ public:
 
     String getUniqueId(const String & path) const override;
 
-    bool checkObjectExists(const String & path) const;
     bool checkUniqueId(const String & id) const override;
 
     void createHardLink(const String & src_path, const String & dst_path) override;

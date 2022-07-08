@@ -54,8 +54,9 @@ public:
         , s3_settings(std::move(s3_settings_))
         , s3_capabilities(s3_capabilities_)
         , version_id(std::move(version_id_))
-        , cache(std::move(cache_))
-    {}
+        , cache(cache_)
+    {
+    }
 
     bool exists(const StoredObject & object) const override;
 
@@ -129,7 +130,7 @@ public:
 
     void removeCacheIfExists(const std::string & path) override;
 
-    const String & getCacheBasePath() const override;
+    String getCacheBasePath() const override;
 
 private:
     void setNewSettings(std::unique_ptr<S3ObjectStorageSettings> && s3_settings_);

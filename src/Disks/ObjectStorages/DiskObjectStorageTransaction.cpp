@@ -402,7 +402,8 @@ void DiskObjectStorageTransaction::moveFile(const String & from_path, const Stri
 
 void DiskObjectStorageTransaction::replaceFile(const std::string & from_path, const std::string & to_path)
 {
-    operations_to_execute.emplace_back(std::make_unique<ReplaceFileObjectStorageOperation>(object_storage, metadata_storage, from_path, to_path));
+    auto operation = std::make_unique<ReplaceFileObjectStorageOperation>(object_storage, metadata_storage, from_path, to_path);
+    operations_to_execute.emplace_back(std::move(operation));
 }
 
 void DiskObjectStorageTransaction::clearDirectory(const std::string & path)
@@ -421,17 +422,22 @@ void DiskObjectStorageTransaction::removeFile(const std::string & path)
 
 void DiskObjectStorageTransaction::removeSharedFile(const std::string & path, bool keep_shared_data)
 {
-    operations_to_execute.emplace_back(std::make_unique<RemoveObjectStorageOperation>(object_storage, metadata_storage, path, keep_shared_data, false));
+    auto operation = std::make_unique<RemoveObjectStorageOperation>(object_storage, metadata_storage, path, keep_shared_data, false);
+    operations_to_execute.emplace_back(std::move(operation));
 }
 
-void DiskObjectStorageTransaction::removeSharedRecursive(const std::string & path, bool keep_all_shared_data, const NameSet & file_names_remove_metadata_only)
+void DiskObjectStorageTransaction::removeSharedRecursive(
+    const std::string & path, bool keep_all_shared_data, const NameSet & file_names_remove_metadata_only)
 {
-    operations_to_execute.emplace_back(std::make_unique<RemoveRecursiveObjectStorageOperation>(object_storage, metadata_storage, path, keep_all_shared_data, file_names_remove_metadata_only));
+    auto operation = std::make_unique<RemoveRecursiveObjectStorageOperation>(
+        object_storage, metadata_storage, path, keep_all_shared_data, file_names_remove_metadata_only);
+    operations_to_execute.emplace_back(std::move(operation));
 }
 
 void DiskObjectStorageTransaction::removeSharedFileIfExists(const std::string & path, bool keep_shared_data)
 {
-    operations_to_execute.emplace_back(std::make_unique<RemoveObjectStorageOperation>(object_storage, metadata_storage, path, keep_shared_data, true));
+    auto operation = std::make_unique<RemoveObjectStorageOperation>(object_storage, metadata_storage, path, keep_shared_data, true);
+    operations_to_execute.emplace_back(std::move(operation));
 }
 
 void DiskObjectStorageTransaction::removeDirectory(const std::string & path)
@@ -455,7 +461,8 @@ void DiskObjectStorageTransaction::removeFileIfExists(const std::string & path)
 }
 
 
-void DiskObjectStorageTransaction::removeSharedFiles(const RemoveBatchRequest & files, bool keep_all_batch_data, const NameSet & file_names_remove_metadata_only)
+void DiskObjectStorageTransaction::removeSharedFiles(
+    const RemoveBatchRequest & files, bool keep_all_batch_data, const NameSet & file_names_remove_metadata_only)
 {
     for (const auto & file : files)
     {

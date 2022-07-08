@@ -56,6 +56,7 @@ public:
     static constexpr int RESTORABLE_SCHEMA_VERSION = 1;
 
     std::atomic<UInt64> revision_counter = 0;
+
 private:
     struct RestoreInformation
     {
@@ -72,7 +73,7 @@ private:
     void moveRecursiveOrRemove(const String & from_path, const String & to_path, bool send_metadata);
 
     void saveSchemaVersion(const int & version) const;
-    void updateObjectMetadata(const String & key, const ObjectAttributes & metadata) const;
+    void updateObjectMetadata(const StoredObject & object, const ObjectAttributes & metadata) const;
     void migrateFileToRestorableSchema(const String & path) const;
     void migrateToRestorableSchemaRecursive(const String & path, Futures & results);
 
@@ -80,6 +81,7 @@ private:
     void restoreFiles(IObjectStorage * source_object_storage, const RestoreInformation & restore_information);
     void processRestoreFiles(IObjectStorage * source_object_storage, const String & source_path, const std::vector<String> & keys) const;
     void restoreFileOperations(IObjectStorage * source_object_storage, const RestoreInformation & restore_information);
+    String addPrefix(const String & key) const;
 
     inline static const String RESTORE_FILE_NAME = "restore";
 

@@ -82,7 +82,7 @@ public:
     void applyNewSettings(const Poco::Util::AbstractConfiguration & config, ContextPtr context, const String & config_prefix, const DisksMap & map) override;
 
     bool isCached() const override { return delegate->isCached(); }
-    const String & getCacheBasePath() const override { return delegate->getCacheBasePath(); }
+    String getCacheBasePath() const override { return delegate->getCacheBasePath(); }
 
     StoredObjects getStorageObjects(const String & path) const override { return delegate->getStorageObjects(path); }
     DiskObjectStoragePtr getObjectStorage(const String &) override;
