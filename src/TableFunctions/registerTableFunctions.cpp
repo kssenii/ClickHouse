@@ -59,6 +59,7 @@ void registerTableFunctions()
     registerTableFunctionDictionary(factory);
 
     registerTableFunctionFormat(factory);
+    registerTableFunctionMergeTreeParts(factory);
 }
 
 }

@@ -58,6 +58,8 @@ void registerTableFunctionDictionary(TableFunctionFactory & factory);
 
 void registerTableFunctionFormat(TableFunctionFactory & factory);
 
+void registerTableFunctionMergeTreeParts(TableFunctionFactory & factory);
+
 void registerTableFunctions();
 
 }
