@@ -16,10 +16,10 @@ struct MergeTreeIndexGranularityInfo
 {
 public:
     /// Marks file extension '.mrk' or '.mrk2'
-    String marks_file_extension;
+    String marks_file_extension;/// based on part type
 
     /// Is stride in rows between marks non fixed?
-    bool is_adaptive = false;
+    bool is_adaptive = false; /// true
 
     /// Fixed size in rows of one granule if index_granularity_bytes is zero
     size_t fixed_index_granularity = 0;

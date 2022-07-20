@@ -4,6 +4,8 @@
 #include <Common/HashTable/HashMap.h>
 #include <Storages/MergeTree/MergeTreeReaderStream.h>
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
+#include <Storages/MergeTree/IMergeTreeDataPart.h>
+#include <Storages/MergeTree/IMergeTreeDataPartInfoForReader.h>
 
 namespace DB
 {
@@ -20,7 +22,7 @@ public:
     using DeserializeBinaryBulkStateMap = std::map<std::string, ISerialization::DeserializeBinaryBulkStatePtr>;
 
     IMergeTreeReader(
-        const MergeTreeData::DataPartPtr & data_part_,
+        MergeTreeDataPartInfoForReaderPtr data_part_info_,
         const NamesAndTypesList & columns_,
         const StorageMetadataPtr & metadata_snapshot_,
         UncompressedCache * uncompressed_cache_,
@@ -60,7 +62,7 @@ public:
         return all_mark_ranges.front().begin;
     }
 
-    MergeTreeData::DataPartPtr data_part;
+    MergeTreeDataPartInfoForReaderPtr data_part_info;
 
 protected:
     /// Returns actual column type in part, which can differ from table metadata.
@@ -82,7 +84,6 @@ protected:
 
     MergeTreeReaderSettings settings;
 
-    const MergeTreeData & storage;
     StorageMetadataPtr metadata_snapshot;
     MarkRanges all_mark_ranges;
 
@@ -91,7 +92,7 @@ protected:
 
 private:
     /// Alter conversions, which must be applied on fly if required
-    MergeTreeData::AlterConversions alter_conversions;
+    AlterConversions alter_conversions;
 
     /// Actual data type of columns in part
 

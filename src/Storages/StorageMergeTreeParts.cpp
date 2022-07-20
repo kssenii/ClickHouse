@@ -3,6 +3,7 @@
 #include <QueryPipeline/Pipe.h>
 #include <Processors/ISource.h>
 #include <Storages/MergeTree/MergeTreeRangeReader.h>
+#include <Storages/MergeTree/IMergeTreeReader.h>
 
 
 namespace DB
@@ -47,7 +48,14 @@ public:
             if (!part_to_read)
                 return {};
 
-            // reader = std::make_unique<MergeTreeRangeReader>(, nullptr, nullptr, true, {});
+           //  auto read_info = std::make_shared<MergeTreeDataPartInfoForReader>(
+           //      part_to_read->type
+           //  );
+
+           //  auto single_disk_volume = std::make_shared<SingleDiskVolume>(disk->getName(), disk, 0);
+           //  auto data_part_storage = std::make_shared<DataPartStorageOnDisk>(single_disk_volume, temp_part_dir.parent_path(), part_name);
+            // reader = std::make_unique<MergeTreeReader>()
+            // range_reader = std::make_unique<MergeTreeRangeReader>(*reader, nullptr, nullptr, true, {});
         }
 
         // auto read_result = reader->read();
@@ -62,7 +70,8 @@ public:
 
 private:
     PartsToReadInfoPtr parts_info;
-    std::unique_ptr<MergeTreeRangeReader> reader;
+    std::unique_ptr<IMergeTreeReader> reader;
+    std::unique_ptr<MergeTreeRangeReader> range_reader;
 };
 
 

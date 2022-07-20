@@ -359,6 +359,67 @@ MergeTreeData::MergeTreeData(
     };
 }
 
+// MergeTreeData::MergeTreeData(
+//     const StorageID & table_id_,
+//     const String & relative_data_path_,
+//     const StorageInMemoryMetadata & metadata_,
+//     ContextMutablePtr context_,
+//     const String & date_column_name,
+//     const MergingParams & merging_params_,
+//     std::unique_ptr<MergeTreeSettings> storage_settings_,
+//     bool require_part_metadata_,
+//     bool attach,
+//     BrokenPartCallback broken_part_callback_)
+//     : IStorage(table_id_)
+//     , WithMutableContext(context_->getGlobalContext())
+//     , merging_params(merging_params_)
+//     , require_part_metadata(require_part_metadata_)
+//     , relative_data_path(relative_data_path_)
+//     , broken_part_callback(broken_part_callback_)
+//     , log_name(table_id_.getNameForLogs())
+//     , log(&Poco::Logger::get(log_name))
+//     , storage_settings(std::move(storage_settings_))
+//     , pinned_part_uuids(std::make_shared<PinnedPartUUIDs>())
+//     , data_parts_by_info(data_parts_indexes.get<TagByInfo>())
+//     , data_parts_by_state_and_info(data_parts_indexes.get<TagByStateAndInfo>())
+//     , parts_mover(this)
+//     , background_operations_assignee(*this, BackgroundJobsAssignee::Type::DataProcessing, getContext())
+//     , background_moves_assignee(*this, BackgroundJobsAssignee::Type::Moving, getContext())
+//     , use_metadata_cache(getSettings()->use_metadata_cache)
+// {
+//     const auto settings = getSettings();
+//     allow_nullable_key = settings->allow_nullable_key;
+//
+//     if (relative_data_path.empty())
+//         throw Exception("MergeTree storages require data path", ErrorCodes::INCORRECT_FILE_NAME);
+//
+//     MergeTreeDataFormatVersion min_format_version = MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING;
+//     is_custom_partitioned = true;
+//     checkPartitionKeyAndInitMinMax(metadata_.partition_key);
+//
+//     setProperties(metadata_, metadata_, attach);
+//
+//     /// NOTE: using the same columns list as is read when performing actual merges.
+//     merging_params.check(metadata_);
+//
+//     if (metadata_.sampling_key.definition_ast != nullptr)
+//     {
+//         /// This is for backward compatibility.
+//         checkSampleExpression(metadata_, attach || settings->compatibility_allow_sampling_expression_not_in_primary_key,
+//                               settings->check_sample_column_is_correct && !attach);
+//     }
+//
+//     checkTTLExpressions(metadata_, metadata_);
+//
+//     /// format_file always contained on any data path
+//     PathWithDisk version_file;
+//
+//     String reason;
+//     if (!canUsePolymorphicParts(*settings, &reason) && !reason.empty())
+//         LOG_WARNING(log, "{} Settings 'min_rows_for_wide_part', 'min_bytes_for_wide_part', "
+//             "'min_rows_for_compact_part' and 'min_bytes_for_compact_part' will be ignored.", reason);
+// }
+
 StoragePolicyPtr MergeTreeData::getStoragePolicy() const
 {
     return getContext()->getStoragePolicy(getSettings()->storage_policy);
@@ -4197,6 +4258,8 @@ void MergeTreeData::restorePartFromBackup(std::shared_ptr<RestoredPartsHolder> r
 
     auto single_disk_volume = std::make_shared<SingleDiskVolume>(disk->getName(), disk, 0);
     auto data_part_storage = std::make_shared<DataPartStorageOnDisk>(single_disk_volume, temp_part_dir.parent_path(), part_name);
+
+    /// KSSENII
     auto part = createPart(part_name, part_info, data_part_storage);
     part->version.setCreationTID(Tx::PrehistoricTID, nullptr);
     part->loadColumnsChecksumsIndexes(false, true);
