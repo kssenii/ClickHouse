@@ -1,0 +1,23 @@
+<clickhouse>
+    <storage_configuration>
+        <disks>
+            <s3_readonly>
+                <type>s3</type>
+                <endpoint>http://minio1:9001/root/data/</endpoint>
+                <access_key_id>minio</access_key_id>
+                <secret_access_key>minio123</secret_access_key>
+                <s3_max_single_part_upload_size>33554432</s3_max_single_part_upload_size>
+                <read_only>0</read_only>
+            </s3_readonly>
+        </disks>
+        <policies>
+            <s3_readonly>
+                <volumes>
+                    <main>
+                        <disk>s3_readonly</disk>
+                    </main>
+                </volumes>
+            </s3_readonly>
+        </policies>
+    </storage_configuration>
+</clickhouse>

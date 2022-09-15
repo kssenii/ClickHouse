@@ -244,20 +244,6 @@ void CachedObjectStorage::removeObjectsIfExist(const StoredObjects & objects)
     object_storage->removeObjectsIfExist(objects);
 }
 
-ReadSettings CachedObjectStorage::getAdjustedSettingsFromMetadataFile(const ReadSettings & settings, const std::string & path) const
-{
-    ReadSettings new_settings{settings};
-    new_settings.is_file_cache_persistent = isFileWithPersistentCache(path) && cache_settings.do_not_evict_index_and_mark_files;
-    return new_settings;
-}
-
-WriteSettings CachedObjectStorage::getAdjustedSettingsFromMetadataFile(const WriteSettings & settings, const std::string & path) const
-{
-    WriteSettings new_settings{settings};
-    new_settings.is_file_cache_persistent = isFileWithPersistentCache(path) && cache_settings.do_not_evict_index_and_mark_files;
-    return new_settings;
-}
-
 void CachedObjectStorage::copyObjectToAnotherObjectStorage( // NOLINT
     const StoredObject & object_from,
     const StoredObject & object_to,

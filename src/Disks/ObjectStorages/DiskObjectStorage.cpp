@@ -26,6 +26,7 @@ namespace ErrorCodes
     extern const int FILE_DOESNT_EXIST;
     extern const int ATTEMPT_TO_READ_AFTER_EOF;
     extern const int CANNOT_READ_ALL_DATA;
+    extern const int DISK_IS_READONLY;
 }
 
 namespace
@@ -84,10 +85,18 @@ DiskTransactionPtr DiskObjectStorage::createTransaction()
 
 DiskTransactionPtr DiskObjectStorage::createObjectStorageTransaction()
 {
+    assertNotReadOnly();
+
     return std::make_shared<DiskObjectStorageTransaction>(
         *object_storage,
         *metadata_storage,
         send_metadata ? metadata_helper.get() : nullptr);
+}
+
+void DiskObjectStorage::assertNotReadOnly() const
+{
+    if (isReadOnly())
+        throw Exception(ErrorCodes::DISK_IS_READONLY, "Disk `{}` is read-only. Operation not allowed", getName());
 }
 
 std::shared_ptr<Executor> DiskObjectStorage::getAsyncExecutor(const std::string & log_name, size_t size)
@@ -103,7 +112,8 @@ DiskObjectStorage::DiskObjectStorage(
     MetadataStoragePtr metadata_storage_,
     ObjectStoragePtr object_storage_,
     bool send_metadata_,
-    uint64_t thread_pool_size_)
+    uint64_t thread_pool_size_,
+    bool is_readonly_)
     : IDisk(getAsyncExecutor(log_name, thread_pool_size_))
     , name(name_)
     , object_storage_root_path(object_storage_root_path_)
@@ -113,7 +123,9 @@ DiskObjectStorage::DiskObjectStorage(
     , send_metadata(send_metadata_)
     , threadpool_size(thread_pool_size_)
     , metadata_helper(std::make_unique<DiskObjectStorageRemoteMetadataRestoreHelper>(this, ReadSettings{}))
-{}
+    , is_readonly(is_readonly_)
+{
+}
 
 StoredObjects DiskObjectStorage::getStorageObjects(const String & local_path) const
 {
@@ -409,14 +421,16 @@ void DiskObjectStorage::chmod(const String & path, mode_t mode)
 void DiskObjectStorage::shutdown()
 {
     LOG_INFO(log, "Shutting down disk {}", name);
+
     object_storage->shutdown();
+
     LOG_INFO(log, "Disk {} shut down", name);
 }
 
 void DiskObjectStorage::startup(ContextPtr context)
 {
-
     LOG_INFO(log, "Starting up disk {}", name);
+
     object_storage->startup();
 
     restoreMetadataIfNeeded(context->getConfigRef(), "storage_configuration.disks." + name, context);
@@ -479,11 +493,6 @@ bool DiskObjectStorage::supportsCache() const
     return object_storage->supportsCache();
 }
 
-bool DiskObjectStorage::isReadOnly() const
-{
-    return object_storage->isReadOnly();
-}
-
 DiskObjectStoragePtr DiskObjectStorage::createDiskObjectStorage()
 {
     return std::make_shared<DiskObjectStorage>(
@@ -493,7 +502,8 @@ DiskObjectStoragePtr DiskObjectStorage::createDiskObjectStorage()
         metadata_storage,
         object_storage,
         send_metadata,
-        threadpool_size);
+        threadpool_size,
+        is_readonly);
 }
 
 void DiskObjectStorage::wrapWithCache(FileCachePtr cache, const FileCacheSettings & cache_settings, const String & layer_name)
@@ -520,11 +530,7 @@ std::unique_ptr<ReadBufferFromFileBase> DiskObjectStorage::readFile(
     std::optional<size_t> read_hint,
     std::optional<size_t> file_size) const
 {
-    return object_storage->readObjects(
-        metadata_storage->getStorageObjects(path),
-        object_storage->getAdjustedSettingsFromMetadataFile(settings, path),
-        read_hint,
-        file_size);
+    return object_storage->readObjects(metadata_storage->getStorageObjects(path), settings, read_hint, file_size);
 }
 
 std::unique_ptr<WriteBufferFromFileBase> DiskObjectStorage::writeFile(
@@ -536,19 +542,15 @@ std::unique_ptr<WriteBufferFromFileBase> DiskObjectStorage::writeFile(
     LOG_TEST(log, "Write file: {}", path);
 
     auto transaction = createObjectStorageTransaction();
-    auto result = transaction->writeFile(
-        path,
-        buf_size,
-        mode,
-        object_storage->getAdjustedSettingsFromMetadataFile(settings, path));
-
-    return result;
+    return transaction->writeFile(path, buf_size, mode, settings);
 }
 
 void DiskObjectStorage::applyNewSettings(
     const Poco::Util::AbstractConfiguration & config, ContextPtr context_, const String &, const DisksMap &)
 {
     const auto config_prefix = "storage_configuration.disks." + name;
+    is_readonly = config.getBool(config_prefix + ".read_only", false);
+
     object_storage->applyNewSettings(config, config_prefix, context_);
 
     if (AsyncThreadPoolExecutor * exec = dynamic_cast<AsyncThreadPoolExecutor *>(&getExecutor()))

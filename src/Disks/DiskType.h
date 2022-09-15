@@ -42,6 +42,7 @@ struct DataSourceDescription
 
     bool is_encrypted = false;
     bool is_cached = false;
+    bool is_readonly = false;
 
     bool operator==(const DataSourceDescription & other) const;
 };

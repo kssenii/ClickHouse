@@ -65,7 +65,7 @@ void checkRemoveAccess(IDisk & disk)
     disk.removeFile("test_acl");
 }
 
-bool checkBatchRemoveIsMissing(S3ObjectStorage & storage, const String & key_with_trailing_slash)
+bool checkBatchRemoveIsMissing(IObjectStorage & storage, const String & key_with_trailing_slash)
 {
     StoredObject object(key_with_trailing_slash + "_test_remove_objects_capability");
     try
@@ -127,7 +127,7 @@ void registerDiskS3(DiskFactory & factory)
         auto metadata_storage = std::make_shared<MetadataStorageFromDisk>(metadata_disk, uri.key);
         S3Capabilities s3_capabilities = getCapabilitiesFromConfig(config, config_prefix);
 
-        auto s3_storage = std::make_unique<S3ObjectStorage>(
+        std::shared_ptr<IObjectStorage> object_storage = std::make_unique<S3ObjectStorage>(
             getClient(config, config_prefix, context),
             getSettings(config, config_prefix, context),
             uri.version_id, s3_capabilities, uri.bucket, uri.endpoint);
@@ -137,7 +137,7 @@ void registerDiskS3(DiskFactory & factory)
         if (!skip_access_check)
         {
             /// If `support_batch_delete` is turned on (default), check and possibly switch it off.
-            if (s3_capabilities.support_batch_delete && checkBatchRemoveIsMissing(*s3_storage, uri.key))
+            if (s3_capabilities.support_batch_delete && checkBatchRemoveIsMissing(*object_storage, uri.key))
             {
                 LOG_WARNING(
                     &Poco::Logger::get("registerDiskS3"),
@@ -146,24 +146,27 @@ void registerDiskS3(DiskFactory & factory)
                     "To remove this message set `s3_capabilities.support_batch_delete` for the disk to `false`.",
                     name
                 );
-                s3_storage->setCapabilitiesSupportBatchDelete(false);
+                std::static_pointer_cast<S3ObjectStorage>(object_storage)->setCapabilitiesSupportBatchDelete(false);
             }
         }
 
         bool send_metadata = config.getBool(config_prefix + ".send_metadata", false);
         uint64_t copy_thread_pool_size = config.getUInt(config_prefix + ".thread_pool_size", 16);
 
+        bool is_readonly = config.getBool(config_prefix + ".read_only", false);
+
         std::shared_ptr<DiskObjectStorage> s3disk = std::make_shared<DiskObjectStorage>(
             name,
             uri.key,
             "DiskS3",
             std::move(metadata_storage),
-            std::move(s3_storage),
+            std::move(object_storage),
             send_metadata,
-            copy_thread_pool_size);
+            copy_thread_pool_size,
+            is_readonly);
 
         /// This code is used only to check access to the corresponding disk.
-        if (!skip_access_check)
+        if (!skip_access_check && !is_readonly)
         {
             checkWriteAccess(*s3disk);
             checkReadAccess(name, *s3disk);

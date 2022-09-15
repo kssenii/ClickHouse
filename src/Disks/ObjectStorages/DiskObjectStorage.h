@@ -34,7 +34,8 @@ public:
         MetadataStoragePtr metadata_storage_,
         ObjectStoragePtr object_storage_,
         bool send_metadata_,
-        uint64_t thread_pool_size_);
+        uint64_t thread_pool_size_,
+        bool is_readonly_ = false);
 
     /// Create fake transaction
     DiskTransactionPtr createTransaction() override;
@@ -170,10 +171,7 @@ public:
 
     bool supportsCache() const override;
 
-    /// Is object storage read only?
-    /// For example: WebObjectStorage is read only as it allows to read from a web server
-    /// with static files, so only read-only operations are allowed for this storage.
-    bool isReadOnly() const override;
+    bool isReadOnly() const override { return is_readonly; }
 
     /// Add a cache layer.
     /// Example: DiskObjectStorage(S3ObjectStorage) -> DiskObjectStorage(CachedObjectStorage(S3ObjectStorage))
@@ -199,6 +197,9 @@ public:
     void chmod(const String & path, mode_t mode) override;
 
 private:
+    void addReadOnlyLayerUnlocked();
+
+    void assertNotReadOnly() const;
 
     /// Create actual disk object storage transaction for operations
     /// execution.
@@ -221,6 +222,8 @@ private:
     size_t threadpool_size;
 
     std::unique_ptr<DiskObjectStorageRemoteMetadataRestoreHelper> metadata_helper;
+
+    std::atomic<bool> is_readonly;
 };
 
 using DiskObjectStoragePtr = std::shared_ptr<DiskObjectStorage>;

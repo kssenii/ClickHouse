@@ -46,7 +46,7 @@ BlockIO InterpreterCreateIndexQuery::execute()
     }
 
     StoragePtr table = DatabaseCatalog::instance().getTable(table_id, current_context);
-    if (table->isStaticStorage())
+    if (table->isReadOnlyStorage())
         throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
 
     /// Convert ASTCreateIndexQuery to AlterCommand.

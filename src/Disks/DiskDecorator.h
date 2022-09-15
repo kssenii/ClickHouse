@@ -65,6 +65,7 @@ public:
     time_t getLastChanged(const String & path) const override;
     Poco::Timestamp getLastModified(const String & path) const override;
     void setReadOnly(const String & path) override;
+    bool isReadOnly() const override { return delegate->isReadOnly(); }
     void createHardLink(const String & src_path, const String & dst_path) override;
     void truncateFile(const String & path, size_t size) override;
     int open(const String & path, mode_t mode) const;

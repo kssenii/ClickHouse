@@ -44,7 +44,7 @@ BlockIO InterpreterDeleteQuery::execute()
     /// First check table storage for validations.
     StoragePtr table = DatabaseCatalog::instance().getTable(table_id, getContext());
     checkStorageSupportsTransactionsIfNeeded(table, getContext());
-    if (table->isStaticStorage())
+    if (table->isReadOnlyStorage())
         throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
 
     DatabasePtr database = DatabaseCatalog::instance().getDatabase(table_id.database_name);

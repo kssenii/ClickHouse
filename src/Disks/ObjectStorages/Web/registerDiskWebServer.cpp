@@ -37,18 +37,18 @@ void registerDiskWebServer(DiskFactory & factory)
                 ErrorCodes::BAD_ARGUMENTS, "Bad URI: `{}`. Error: {}", uri, e.what());
         }
 
-        auto object_storage = std::make_shared<WebObjectStorage>(uri, context);
+        ObjectStoragePtr object_storage = std::make_shared<WebObjectStorage>(uri, context);
         auto metadata_storage = std::make_shared<MetadataStorageFromStaticFilesWebServer>(assert_cast<const WebObjectStorage &>(*object_storage));
-        std::string root_path;
 
         return std::make_shared<DiskObjectStorage>(
             disk_name,
-            root_path,
+            "",
             "DiskWebServer",
             metadata_storage,
             object_storage,
             /* send_metadata */false,
-            /* threadpool_size */16);
+            /* threadpool_size */16,
+            /* is_readonly */true);
     };
 
     factory.registerDiskType("web", creator);

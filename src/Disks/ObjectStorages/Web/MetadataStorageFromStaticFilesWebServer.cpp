@@ -2,6 +2,7 @@
 #include <Disks/IDisk.h>
 #include <Common/filesystemHelpers.h>
 #include <Common/logger_useful.h>
+#include <Common/escapeForFileName.h>
 #include <IO/WriteHelpers.h>
 
 
@@ -53,7 +54,23 @@ const std::string & MetadataStorageFromStaticFilesWebServer::getPath() const
 
 bool MetadataStorageFromStaticFilesWebServer::exists(const std::string & path) const
 {
-    return object_storage.files.contains(path);
+    fs::path fs_path(path);
+    if (fs_path.has_extension())
+        fs_path = fs_path.parent_path();
+
+    initializeIfNeeded(fs_path, false);
+
+    if (object_storage.files.empty())
+        return false;
+
+    if (object_storage.files.contains(path))
+        return true;
+
+    for (const auto & [object_path, _] : object_storage.files)
+        if (startsWith(object_path, path))
+            return true;
+
+    return false;
 }
 
 void MetadataStorageFromStaticFilesWebServer::assertExists(const std::string & path) const
@@ -98,7 +115,10 @@ uint64_t MetadataStorageFromStaticFilesWebServer::getFileSize(const String & pat
 StoredObjects MetadataStorageFromStaticFilesWebServer::getStorageObjects(const std::string & path) const
 {
     assertExists(path);
-    return {StoredObject::create(object_storage, path, object_storage.files.at(path).size, true)};
+    auto fs_path = fs::path(object_storage.url) / path;
+    std::string remote_path = fs_path.parent_path() / (escapeForFileName(fs_path.stem()) + fs_path.extension().string());
+    remote_path = remote_path.substr(object_storage.url.size());
+    return {StoredObject::create(object_storage, remote_path, object_storage.files.at(path).size, true)};
 }
 
 std::vector<std::string> MetadataStorageFromStaticFilesWebServer::listDirectory(const std::string & path) const
@@ -112,7 +132,7 @@ std::vector<std::string> MetadataStorageFromStaticFilesWebServer::listDirectory(
     return result;
 }
 
-bool MetadataStorageFromStaticFilesWebServer::initializeIfNeeded(const std::string & path) const
+bool MetadataStorageFromStaticFilesWebServer::initializeIfNeeded(const std::string & path, std::optional<bool> throw_on_error) const
 {
     if (object_storage.files.find(path) == object_storage.files.end())
     {
@@ -123,7 +143,7 @@ bool MetadataStorageFromStaticFilesWebServer::initializeIfNeeded(const std::stri
         catch (...)
         {
             const auto message = getCurrentExceptionMessage(false);
-            bool can_throw = CurrentThread::isInitialized() && CurrentThread::get().getQueryContext();
+            bool can_throw = throw_on_error.has_value() ? *throw_on_error : CurrentThread::isInitialized() && CurrentThread::get().getQueryContext();
             if (can_throw)
                 throw Exception(ErrorCodes::NETWORK_ERROR, "Cannot load disk metadata. Error: {}", message);
 

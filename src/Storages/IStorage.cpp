@@ -235,7 +235,7 @@ NameDependencies IStorage::getDependentViewsByColumn(ContextPtr context) const
     return name_deps;
 }
 
-bool IStorage::isStaticStorage() const
+bool IStorage::isReadOnlyStorage() const
 {
     auto storage_policy = getStoragePolicy();
     if (storage_policy)

@@ -153,6 +153,7 @@ namespace ErrorCodes
     extern const int TOO_MANY_SIMULTANEOUS_QUERIES;
     extern const int INCORRECT_QUERY;
     extern const int CANNOT_RESTORE_TABLE;
+    extern const int FILE_DOESNT_EXIST;
 }
 
 static void checkSampleExpression(const StorageInMemoryMetadata & metadata, bool allow_sampling_expression_not_in_primary_key, bool check_sample_column_is_correct)
@@ -279,20 +280,36 @@ MergeTreeData::MergeTreeData(
 
     /// format_file always contained on any data path
     PathWithDisk version_file;
-    /// Creating directories, if not exist.
+
     for (const auto & disk : getDisks())
     {
         if (disk->isBroken())
             continue;
 
-        disk->createDirectories(relative_data_path);
-        disk->createDirectories(fs::path(relative_data_path) / MergeTreeData::DETACHED_DIR_NAME);
+        auto detached_dir_name = fs::path(relative_data_path) / MergeTreeData::DETACHED_DIR_NAME;
+
+        if (disk->isReadOnly())
+        {
+            if (!disk->exists(relative_data_path))
+                throw Exception(ErrorCodes::FILE_DOESNT_EXIST, "File {} does not exist and cannot be created because disk is read-only", relative_data_path);
+
+            if (!disk->exists(detached_dir_name))
+                throw Exception(ErrorCodes::FILE_DOESNT_EXIST, "File {} does not exist and cannot be created because disk is read-only", detached_dir_name.string());
+        }
+        else
+        {
+            /// Creating directories, if not exist.
+            disk->createDirectories(relative_data_path);
+            disk->createDirectories(detached_dir_name);
+        }
+
         String current_version_file_path = fs::path(relative_data_path) / MergeTreeData::FORMAT_VERSION_FILE_NAME;
 
         if (disk->exists(current_version_file_path))
         {
             if (!version_file.first.empty())
                 throw Exception(ErrorCodes::CORRUPTED_DATA, "Duplication of version file {} and {}", fullPath(version_file.second, version_file.first), current_version_file_path);
+
             version_file = {current_version_file_path, disk};
         }
     }
@@ -1986,7 +2003,7 @@ size_t MergeTreeData::clearOldBrokenPartsFromDetachedDirectory()
         renamed_parts.addPart(part_info.dir_name, "deleting_" + part_info.dir_name, part_info.disk);
     }
 
-    LOG_INFO(log, "Will clean up {} detached parts", renamed_parts.old_and_new_names.size());
+    LOG_INFO(log, "Will clean up old broken detached parts ({})", renamed_parts.old_and_new_names.size());
 
     renamed_parts.tryRenameAll();
 

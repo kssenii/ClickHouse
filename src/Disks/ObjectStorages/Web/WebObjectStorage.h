@@ -95,8 +95,6 @@ public:
 
     bool isRemote() const override { return true; }
 
-    bool isReadOnly() const override { return true; }
-
 protected:
     void initialize(const String & uri_path) const;
 

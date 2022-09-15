@@ -99,17 +99,11 @@ public:
 
     std::string getUniqueId(const std::string & path) const override { return object_storage->getUniqueId(path); }
 
-    bool isReadOnly() const override { return object_storage->isReadOnly(); }
-
     const std::string & getCacheConfigName() const { return cache_config_name; }
 
     ObjectStoragePtr getWrappedObjectStorage() { return object_storage; }
 
     bool supportParallelWrite() const override { return object_storage->supportParallelWrite(); }
-
-    ReadSettings getAdjustedSettingsFromMetadataFile(const ReadSettings & settings, const std::string & path) const override;
-
-    WriteSettings getAdjustedSettingsFromMetadataFile(const WriteSettings & settings, const std::string & path) const override;
 
 private:
     FileCache::Key getCacheKey(const std::string & path) const;

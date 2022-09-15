@@ -580,7 +580,7 @@ public:
     virtual StoragePolicyPtr getStoragePolicy() const { return {}; }
 
     /// Returns true if all disks of storage are read-only.
-    virtual bool isStaticStorage() const;
+    virtual bool isReadOnlyStorage() const;
 
     virtual bool supportsSubsetOfColumns() const { return false; }
 

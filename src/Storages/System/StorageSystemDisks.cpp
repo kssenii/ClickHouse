@@ -25,6 +25,7 @@ StorageSystemDisks::StorageSystemDisks(const StorageID & table_id_)
         {"type", std::make_shared<DataTypeString>()},
         {"is_encrypted", std::make_shared<DataTypeUInt8>()},
         {"cache_path", std::make_shared<DataTypeString>()},
+        {"is_readonly", std::make_shared<DataTypeUInt8>()}
     }));
     setInMemoryMetadata(storage_metadata);
 }
@@ -48,6 +49,7 @@ Pipe StorageSystemDisks::read(
     MutableColumnPtr col_type = ColumnString::create();
     MutableColumnPtr col_is_encrypted = ColumnUInt8::create();
     MutableColumnPtr col_cache_path = ColumnString::create();
+    MutableColumnPtr col_readonly = ColumnUInt8::create();
 
     for (const auto & [disk_name, disk_ptr] : context->getDisksMap())
     {
@@ -65,6 +67,7 @@ Pipe StorageSystemDisks::read(
             cache_path = disk_ptr->getCacheBasePath();
 
         col_cache_path->insert(cache_path);
+        col_readonly->insert(disk_ptr->isReadOnly());
     }
 
     Columns res_columns;
@@ -76,6 +79,7 @@ Pipe StorageSystemDisks::read(
     res_columns.emplace_back(std::move(col_type));
     res_columns.emplace_back(std::move(col_is_encrypted));
     res_columns.emplace_back(std::move(col_cache_path));
+    res_columns.emplace_back(std::move(col_readonly));
 
     UInt64 num_rows = res_columns.at(0)->size();
     Chunk chunk(std::move(res_columns), num_rows);

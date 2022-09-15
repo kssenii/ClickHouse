@@ -205,7 +205,7 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
                 throw Exception("Cannot TRUNCATE dictionary", ErrorCodes::SYNTAX_ERROR);
 
             context_->checkAccess(AccessType::TRUNCATE, table_id);
-            if (table->isStaticStorage())
+            if (table->isReadOnlyStorage())
                 throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
 
             table->checkTableCanBeDropped();
