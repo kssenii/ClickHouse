@@ -768,7 +768,10 @@ void ExpressionActions::execute(Block & block, bool dry_run) const
     execute(block, num_rows, dry_run);
 
     if (!block)
+    {
+        std::cerr << "KEK: " << StackTrace().toString() << "\n\n";
         block.insert({DataTypeUInt8().createColumnConst(num_rows, 0), std::make_shared<DataTypeUInt8>(), "_dummy"});
+    }
 }
 
 Names ExpressionActions::getRequiredColumns() const

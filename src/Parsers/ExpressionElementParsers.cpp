@@ -33,6 +33,9 @@
 #include <Parsers/ExpressionListParsers.h>
 #include <Parsers/ParserSelectWithUnionQuery.h>
 #include <Parsers/ParserCase.h>
+#include <Parsers/ParserCase.h>
+#include <Parsers/ParserDescribeTableQuery.h>
+#include <Parsers/ParserDescribeCacheQuery.h>
 
 #include <Parsers/ExpressionElementParsers.h>
 #include <Parsers/ParserCreateQuery.h>
@@ -140,16 +143,24 @@ bool ParserSubquery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ASTPtr select_node;
     ParserSelectWithUnionQuery select;
+    ParserDescribeTableQuery describe_table;
+    ParserDescribeCacheQuery describe_cache;
 
     if (pos->type != TokenType::OpeningRoundBracket)
         return false;
+
     ++pos;
 
-    if (!select.parse(pos, select_node, expected))
+    if (!select.parse(pos, select_node, expected)
+        && !describe_cache.parse(pos, select_node, expected)
+        && !describe_table.parse(pos, select_node, expected))
+    {
         return false;
+    }
 
     if (pos->type != TokenType::ClosingRoundBracket)
         return false;
+
     ++pos;
 
     node = std::make_shared<ASTSubquery>();

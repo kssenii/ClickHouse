@@ -17,6 +17,8 @@
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
+#include <Parsers/ASTDescribeCacheQuery.h>
+#include <Parsers/TablePropertiesQueriesASTs.h>
 
 #include <Storages/ColumnsDescription.h>
 #include <Storages/IStorage.h>
@@ -183,7 +185,10 @@ JoinedTables::JoinedTables(ContextPtr context_, const ASTSelectQuery & select_qu
 
 bool JoinedTables::isLeftTableSubquery() const
 {
-    return left_table_expression && left_table_expression->as<ASTSelectWithUnionQuery>();
+    return left_table_expression
+        && (left_table_expression->as<ASTSelectWithUnionQuery>()
+            || left_table_expression->as<ASTDescribeQuery>()
+            || left_table_expression->as<ASTDescribeCacheQuery>());
 }
 
 bool JoinedTables::isLeftTableFunction() const

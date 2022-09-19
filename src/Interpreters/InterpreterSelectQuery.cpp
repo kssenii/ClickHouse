@@ -474,6 +474,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
         if (interpreter_subquery)
         {
             source_header = interpreter_subquery->getSampleBlock();
+            std::cerr << "\n\n\nINTERPRETER SUBQUERY: " << source_header.dumpStructure() << "\n\n\n";
             uses_view_source |= interpreter_subquery->usesViewSource();
         }
     }
@@ -502,6 +503,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
         if (view)
             view->replaceWithSubquery(getSelectQuery(), view_table, metadata_snapshot);
 
+        std::cerr << "\n\nSOURCE HEADER: " << source_header.dumpStructure() << "\n\n\n";
         syntax_analyzer_result = TreeRewriter(context).analyzeSelect(
             query_ptr,
             TreeRewriterResult(source_header.getNamesAndTypesList(), storage, storage_snapshot),

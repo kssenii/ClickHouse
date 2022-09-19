@@ -1,7 +1,11 @@
 #include <Interpreters/getTableExpressions.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
+#include <Interpreters/InterpreterDescribeQuery.h>
+#include <Interpreters/InterpreterDescribeCacheQuery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
+#include <Parsers/ASTDescribeCacheQuery.h>
+#include <Parsers/TablePropertiesQueriesASTs.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Storages/IStorage.h>
 
@@ -84,7 +88,12 @@ static NamesAndTypesList getColumnsFromTableExpression(
     if (table_expression.subquery)
     {
         const auto & subquery = table_expression.subquery->children.at(0);
-        names_and_type_list = InterpreterSelectWithUnionQuery::getSampleBlock(subquery, context, true).getNamesAndTypesList();
+        if (subquery->as<ASTDescribeQuery>())
+            names_and_type_list = InterpreterDescribeQuery::getSampleBlock(true).getNamesAndTypesList();
+        else if (subquery->as<ASTDescribeCacheQuery>())
+            names_and_type_list = InterpreterDescribeCacheQuery::getSampleBlock().getNamesAndTypesList();
+        else
+            names_and_type_list = InterpreterSelectWithUnionQuery::getSampleBlock(subquery, context, true).getNamesAndTypesList();
     }
     else if (table_expression.table_function)
     {

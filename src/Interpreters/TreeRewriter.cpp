@@ -982,9 +982,14 @@ void TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
 
     NameSet source_column_names;
     for (const auto & column : source_columns)
+    {
+        std::cerr << "\n\nSource columns names: " << column.name << "\n\n";
         source_column_names.insert(column.name);
+    }
 
     NameSet required = columns_context.requiredColumns();
+    for (const auto & r : required)
+        std::cerr << "\n\nRequired column: " << r << "\n\n";
     if (columns_context.has_table_join)
     {
         NameSet available_columns;
@@ -1094,6 +1099,7 @@ void TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
         const String & column_name = it->name;
         unknown_required_source_columns.erase(column_name);
 
+        std::cerr << "\n\nsource columns === : " << it->name << "\n\n";
         if (!required.contains(column_name))
             it = source_columns.erase(it);
         else
@@ -1211,6 +1217,8 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     if (!select_query)
         throw Exception("Select analyze for not select asts.", ErrorCodes::LOGICAL_ERROR);
 
+    std::cerr << "\n\nquery: " << query->dumpTree() << "\n\n";
+
     size_t subquery_depth = select_options.subquery_depth;
     bool remove_duplicates = select_options.remove_duplicates;
 
@@ -1313,6 +1321,7 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     result.aggregates = getAggregates(query, *select_query);
     result.window_function_asts = getWindowFunctions(query, *select_query);
     result.expressions_with_window_function = getExpressionsWithWindowFunctions(query);
+    std::cerr << "\n\nquery before collect: " << query->dumpTree() << "\n\n";
     result.collectUsedColumns(query, true, settings.query_plan_optimize_primary_key);
     result.required_source_columns_before_expanding_alias_columns = result.required_source_columns.getNames();
 
