@@ -210,8 +210,10 @@ Pipe ReadFromMergeTree::readFromPool(
     MergeTreeReadPool::BackoffSettings backoff_settings(settings);
 
     MergeTreeReadPoolPtr pool;
+    const bool all_parts_are_remote = checkAllPartsOnRemoteFS(parts_with_range);
 
-    if (checkAllPartsOnRemoteFS(parts_with_range) && settings.prefer_prefetched_read_pool)
+    if ((all_parts_are_remote && settings.allow_prefetched_read_pool_for_remote_filesystem)
+        || (!all_parts_are_remote && settings.allow_prefetched_read_pool_for_local_filesystem))
     {
         pool = std::make_shared<MergeTreePrefetchedReadPool>(
             max_streams,

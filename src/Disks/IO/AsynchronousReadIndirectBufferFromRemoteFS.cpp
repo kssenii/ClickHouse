@@ -19,6 +19,7 @@ namespace CurrentMetrics
 namespace ProfileEvents
 {
     extern const Event AsynchronousRemoteReadWaitMicroseconds;
+    extern const Event SynchronousRemoteReadWaitMicroseconds;
     extern const Event RemoteFSSeeks;
     extern const Event RemoteFSPrefetches;
     extern const Event RemoteFSCancelledPrefetches;
@@ -247,10 +248,11 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
 
         ProfileEvents::increment(ProfileEvents::RemoteFSPrefetchedReads);
         ProfileEvents::increment(ProfileEvents::RemoteFSPrefetchedBytes, size);
+        LOG_TEST(log, "Read {} at offset {} without prefetch for {}", impl->getFileName(), file_offset_of_buffer_end, watch.elapsed());
     }
     else
     {
-        ProfileEventTimeIncrement<Microseconds> watch(ProfileEvents::AsynchronousRemoteReadWaitMicroseconds);
+        ProfileEventTimeIncrement<Microseconds> watch(ProfileEvents::SynchronousRemoteReadWaitMicroseconds);
 
         chassert(memory.size() == read_settings.remote_fs_buffer_size);
         std::tie(size, offset) = impl->readInto(memory.data(), memory.size(), file_offset_of_buffer_end, bytes_to_ignore);
@@ -258,6 +260,7 @@ bool AsynchronousReadIndirectBufferFromRemoteFS::nextImpl()
 
         ProfileEvents::increment(ProfileEvents::RemoteFSUnprefetchedReads);
         ProfileEvents::increment(ProfileEvents::RemoteFSUnprefetchedBytes, size);
+        LOG_TEST(log, "Read {} at offset {} from prefetch for {}", impl->getFileName(), file_offset_of_buffer_end, watch.elapsed());
     }
 
     chassert(size >= offset);

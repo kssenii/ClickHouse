@@ -625,8 +625,9 @@ static constexpr UInt64 operator""_GiB(unsigned long long value)
     \
     M(Bool, load_marks_asynchronously, false, "Load MergeTree marks asynchronously", 0) \
     M(Bool, enable_filesystem_read_prefetches_log, false, "Log to system.filesystem prefetch_log during query", 0) \
-    M(Bool, prefer_prefetched_read_pool, true, "Prefer prefethed threadpool", 0) \
-    M(UInt64, max_marks_per_part_to_prefetch, 1, "Maximum number of marks to prefetch within a single part", 0) \
+    M(Bool, allow_prefetched_read_pool_for_remote_filesystem, true, "Prefer prefethed threadpool if all parts are on remote filesystem", 0) \
+    M(Bool, allow_prefetched_read_pool_for_local_filesystem, true, "Prefer prefethed threadpool if all parts are on remote filesystem", 0) \
+    M(UInt64, filesystem_read_prefetch_step, 0, "Maximum number of marks to prefetch within a single part", 0) \
     M(UInt64, max_early_prefetches, 0, "Maximum number of early prefetches. `0` means unlimited: prefetches will be done for all parts and for `max_marks_to_prefetch_per_part` marks within part. But the number of concurrently done prefetches is limited by prefetch_threadpool_size", 0) \
     \
     M(UInt64, use_structure_from_insertion_table_in_table_functions, 2, "Use structure from insertion table instead of schema inference from data. Possible values: 0 - disabled, 1 - enabled, 2 - auto", 0) \

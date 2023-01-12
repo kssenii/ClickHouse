@@ -77,6 +77,8 @@ private:
 
     static MarkRanges getMarkRangesFromPart(size_t need_marks, PartInfo & part);
 
+    static std::string dumpTasks(const ThreadsTasks & tasks);
+
     mutable std::mutex mutex;
     Poco::Logger * log;
 

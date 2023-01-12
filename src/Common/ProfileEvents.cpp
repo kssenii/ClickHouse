@@ -385,6 +385,7 @@ The server successfully detected this situation and will download merged part fr
     \
     M(AsynchronousReadWaitMicroseconds, "Time spent in waiting for asynchronous reads.") \
     M(AsynchronousRemoteReadWaitMicroseconds, "Time spent in waiting for asynchronous remote reads.") \
+    M(SynchronousRemoteReadWaitMicroseconds, "Time spent in waiting for asynchronous remote reads.") \
     \
     M(ExternalDataSourceLocalCacheReadBytes, "Bytes read from local cache buffer in RemoteReadBufferCache")\
     \

@@ -7,6 +7,7 @@
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Interpreters/threadPoolCallbackRunner.h>
 #include <Storages/ElapsedTimeProfileEventIncrement.h>
+#include <IO/Operators.h>
 
 
 namespace ProfileEvents
@@ -105,11 +106,6 @@ std::future<MergeTreeReaderPtr> MergeTreePrefetchedReadPool::createReader(
         uncompressed_cache, mark_cache, reader_settings,
         IMergeTreeReader::ValueSizeMap{}, profile_callback);
 
-    LOG_TEST(
-        log,
-        "Created reader for part {} with ranges: {}",
-        part.data_part->name, toString(required_ranges));
-
     /// In order to make a prefetch we need to wait for marks to be loaded. But we just created
     /// a reader (which starts loading marks in its constructor), then if we do prefetch right
     /// after creating a buffer, it will be very inefficient. We can do prefetch for all parts
@@ -145,13 +141,11 @@ MergeTreeReadTaskPtr MergeTreePrefetchedReadPool::getTask(size_t /* min_marks_to
         /// not so, because this next task will most likely have its own reader a prefetch already on
         /// the fly. (Not to mention that in fact we cannot reuse our own reader if initially we did
         /// not accounted this range into range request to object storage).
-        auto threads_tasks_it = threads_tasks.begin();
-
-        /// Steal only tasks which have an initialized reader (with prefetched data). Thus we avoid
-        /// losing a prefetch by creating our own reader (or resusing our own reader if the part
-        /// is the same as last read by this thread).
-        for (auto tasks_it = threads_tasks_it; it != threads_tasks.end(); ++it)
+        for (auto tasks_it = threads_tasks.begin(); tasks_it != threads_tasks.end(); ++tasks_it)
         {
+            /// Steal only tasks which have an initialized reader (with prefetched data). Thus we avoid
+            /// losing a prefetch by creating our own reader (or resusing our own reader if the part
+            /// is the same as last read by this thread).
             auto & thread_tasks = tasks_it->second;
             auto task_it = std::find_if(
                 thread_tasks.begin(), thread_tasks.end(),
@@ -161,14 +155,16 @@ MergeTreeReadTaskPtr MergeTreePrefetchedReadPool::getTask(size_t /* min_marks_to
                 continue;
 
             auto task = std::move(*task_it);
-            thread_tasks.pop_back();
+            thread_tasks.erase(task_it);
 
             if (thread_tasks.empty())
                 threads_tasks.erase(tasks_it);
 
+            LOG_TEST(log, "Thread {} returns with stolen task ({})", thread, toString(task->mark_ranges));
             return task;
         }
 
+        LOG_TEST(log, "Thread {} returns with no task (current threads tasks: {})", thread, dumpTasks(threads_tasks));
         return nullptr;
     }
 
@@ -177,9 +173,11 @@ MergeTreeReadTaskPtr MergeTreePrefetchedReadPool::getTask(size_t /* min_marks_to
     auto task = std::move(thread_tasks.front());
     thread_tasks.pop_front();
 
+    size_t remaining_tasks_num = thread_tasks.size();
     if (thread_tasks.empty())
         threads_tasks.erase(it);
 
+    LOG_TEST(log, "Thread {} returns with task ({}, reader: {}, remaining_tasks: {})", thread, toString(task->mark_ranges), task->reader.valid(), remaining_tasks_num);
     return task;
 }
 
@@ -204,7 +202,10 @@ MergeTreePrefetchedReadPool::PartsInfos MergeTreePrefetchedReadPool::getPartsInf
 
         /// Sum up total size of all mark ranges in a data part.
         for (const auto & range : part.ranges)
+        {
+            LOG_TEST(log, "Part: {}, sum_marks: {}", part_info->data_part->name, range.end - range.begin);
             part_info->sum_marks += range.end - range.begin;
+        }
 
         const auto task_columns = getReadTaskColumns(
             LoadedMergeTreeDataPartInfoForReader(part.data_part),
@@ -258,6 +259,31 @@ MarkRanges MergeTreePrefetchedReadPool::getMarkRangesFromPart(size_t need_marks,
     return ranges_to_get_from_part;
 }
 
+std::string MergeTreePrefetchedReadPool::dumpTasks(const ThreadsTasks & tasks)
+{
+    WriteBufferFromOwnString result;
+    for (const auto & [thread_id, thread_tasks] : tasks)
+    {
+        result << "thread id: " << toString(thread_id) << ", tasks: " << toString(thread_tasks.size());
+        if (!thread_tasks.empty())
+        {
+            result << "\n";
+            size_t no = 0;
+            for (const auto & task : thread_tasks)
+            {
+                if (no)
+                    result << "\n";
+
+                result << ++no << ": ";
+                result << "reader: " << task->reader.valid() << ", ";
+                result << "ranges: " << toString(task->mark_ranges);
+            }
+        }
+        result << "\n";
+    }
+    return result.str();
+}
+
 MergeTreePrefetchedReadPool::ThreadsTasks MergeTreePrefetchedReadPool::createThreadsTasks(
     size_t threads, size_t sum_marks, size_t min_marks_for_concurrent_read, const PrewhereInfoPtr & prewhere_info) const
 {
@@ -266,7 +292,7 @@ MergeTreePrefetchedReadPool::ThreadsTasks MergeTreePrefetchedReadPool::createThr
 
     ThreadsTasks result_threads_tasks;
     const size_t min_marks_per_thread = (sum_marks - 1) / threads + 1;
-    const size_t max_marks_per_part_to_prefetch = getContext()->getSettingsRef().max_marks_per_part_to_prefetch;
+    const size_t prefetch_step = getContext()->getSettingsRef().filesystem_read_prefetch_step;
 
     LOG_TEST(
         log,
@@ -280,7 +306,7 @@ MergeTreePrefetchedReadPool::ThreadsTasks MergeTreePrefetchedReadPool::createThr
         /// Priority is given according to the prefetch number for each thread,
         /// e.g. the first task of each thread has the same priority and is bigger
         /// than second task of each thread, and so on.
-        int64_t priority = 0;
+        int64_t priority = 1;
 
         while (need_marks > 0 && part_idx < parts_infos.size())
         {
@@ -294,9 +320,9 @@ MergeTreePrefetchedReadPool::ThreadsTasks MergeTreePrefetchedReadPool::createThr
             }
 
             /// Do not get too few rows from part.
-            if (marks_in_part >= min_marks_for_concurrent_read &&
-                need_marks < min_marks_for_concurrent_read)
-                need_marks = min_marks_for_concurrent_read;
+            // if (marks_in_part >= min_marks_for_concurrent_read &&
+            //     need_marks < min_marks_for_concurrent_read)
+            //     need_marks = min_marks_for_concurrent_read;
 
             /// Do not leave too few rows in part for next time.
             // if (marks_in_part > need_marks &&
@@ -307,10 +333,10 @@ MergeTreePrefetchedReadPool::ThreadsTasks MergeTreePrefetchedReadPool::createThr
             size_t marks_to_get_from_part = std::min(need_marks, marks_in_part);
 
             /// Prefetch not only for each part, but also for a required number of mark
-            /// ranges, which is controlled by setting max_marks_per_part_to_prefetch.
-            if (max_marks_per_part_to_prefetch > 1)
+            /// ranges, which is controlled by setting prefetch_step.
+            if (prefetch_step > 1)
             {
-                marks_to_get_from_part = std::min(marks_to_get_from_part, max_marks_per_part_to_prefetch);
+                marks_to_get_from_part = std::min(marks_to_get_from_part, prefetch_step);
             }
 
             if (marks_in_part == marks_to_get_from_part)
@@ -365,8 +391,8 @@ MergeTreePrefetchedReadPool::ThreadsTasks MergeTreePrefetchedReadPool::createThr
 
     LOG_TEST(
         log,
-        "Result tasks: {} (parts: {}, threads: {})",
-        result_threads_tasks.size(), parts_infos.size(), threads);
+        "Result tasks {} for {} threads, {}",
+        result_threads_tasks.size(), threads, dumpTasks(result_threads_tasks));
 
     return result_threads_tasks;
 }
