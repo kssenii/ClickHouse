@@ -4,6 +4,7 @@
 #include <Storages/MergeTree/IMergeTreeReadPool.h>
 #include <Storages/MergeTree/MergeTreeIOSettings.h>
 #include <Core/BackgroundSchedulePool.h>
+#include <IO/AsyncReadCounters.h>
 #include <queue>
 
 namespace Poco { class Logger; }
@@ -99,6 +100,30 @@ private:
     PartsInfos parts_infos;
 
     ThreadsTasks threads_tasks;
+
+    /// A struct which allows to track max number of tasks which were in the
+    /// threadpool simultaneously (similar to CurrentMetrics, but the result
+    /// will be put to QueryLog).
+    struct PrefetchIncrement : boost::noncopyable
+    {
+        explicit PrefetchIncrement(AsyncReadCounters & counters_)
+            : counters(counters_)
+        {
+            std::lock_guard lock(counters.mutex);
+            ++counters.total_prefetch_tasks;
+            if (++counters.current_parallel_prefetch_tasks > counters.max_parallel_prefetch_tasks)
+                counters.max_parallel_prefetch_tasks = counters.current_parallel_prefetch_tasks;
+
+        }
+
+        ~PrefetchIncrement()
+        {
+            std::lock_guard lock(counters.mutex);
+            --counters.current_parallel_prefetch_tasks;
+        }
+
+        AsyncReadCounters & counters;
+    };
 };
 
 }
