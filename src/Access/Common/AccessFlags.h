@@ -88,6 +88,9 @@ public:
     /// Returns all the flags related to a dictionary.
     static AccessFlags allDictionaryFlags();
 
+    /// Returns all the flags related to a named collections.
+    static AccessFlags allNamedCollectionFlags();
+
     /// Returns all the flags which could be granted on the global level.
     /// The same as allFlags().
     static AccessFlags allFlagsGrantableOnGlobalLevel();
@@ -99,6 +102,10 @@ public:
     /// Returns all the flags which could be granted on the table level.
     /// Returns allTableFlags() | allDictionaryFlags() | allColumnFlags().
     static AccessFlags allFlagsGrantableOnTableLevel();
+
+    /// Returns all the flags which could be granted on the named collection level.
+    /// The same as allNamedCollectionFlags().
+    static AccessFlags allFlagsGrantableOnNamedCollectionLevel();
 
     /// Returns all the flags which could be granted on the global level.
     /// The same as allColumnFlags().

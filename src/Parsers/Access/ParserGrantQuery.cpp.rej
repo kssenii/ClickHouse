@@ -1,0 +1,14 @@
+diff a/src/Parsers/Access/ParserGrantQuery.cpp b/src/Parsers/Access/ParserGrantQuery.cpp	(rejected hunks)
+@@ -167,9 +189,11 @@ namespace
+             if (!element.empty())
+                 return false;
+ 
++            const bool grant_on_named_collection = element.access_flags.allNamedCollectionFlags() == element.access_flags.allFlags();
++
+             if (!element.any_column)
+                 throw Exception(old_flags.toString() + " cannot be granted on the column level", ErrorCodes::INVALID_GRANT);
+-            else if (!element.any_table)
++            else if (!element.any_table && !grant_on_named_collection)
+                 throw Exception(old_flags.toString() + " cannot be granted on the table level", ErrorCodes::INVALID_GRANT);
+             else if (!element.any_database)
+                 throw Exception(old_flags.toString() + " cannot be granted on the database level", ErrorCodes::INVALID_GRANT);

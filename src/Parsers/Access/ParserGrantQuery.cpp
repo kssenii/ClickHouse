@@ -7,6 +7,7 @@
 #include <Parsers/ExpressionElementParsers.h>
 #include <Parsers/ExpressionListParsers.h>
 #include <Parsers/parseDatabaseAndTableName.h>
+#include <Parsers/ASTIdentifier.h>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/range/algorithm_ext/erase.hpp>
 
@@ -127,17 +128,38 @@ namespace
                     return false;
 
                 String database_name, table_name;
-                bool any_database = false, any_table = false;
-                if (!parseDatabaseAndTableNameOrAsterisks(pos, expected, database_name, any_database, table_name, any_table))
-                    return false;
+                ASTPtr collection;
+                bool any_database = false, any_table = false, any_named_collection = true;
+
+                IParser::Pos saved_pos = pos;
+                if (ParserKeyword("NAMED COLLECTION").ignore(pos, expected) && ParserIdentifier().parse(pos, collection, expected))
+                {
+                    any_named_collection = false;
+                    any_database = any_table = true;
+                    table_name = collection->as<ASTIdentifier>()->name();
+                }
+                else
+                {
+                    pos = saved_pos;
+                    if (!parseDatabaseAndTableNameOrAsterisks(pos, expected, database_name, any_database, table_name, any_table))
+                        return false;
+                }
 
                 for (auto & [access_flags, columns] : access_and_columns)
                 {
                     AccessRightsElement element;
+
+                    // const auto & access_types = access_flags.toAccessTypes();
+                    // const bool is_grant_on_named_collection = !any_table && any_database && columns.empty()
+                    //     && access_types.size() == 1 && access_types[0] == AccessType::SHOW_NAMED_COLLECTIONS;
+                    // if (is_grant_on_named_collection)
+                    //     any_table = true;
+
                     element.access_flags = access_flags;
                     element.any_column = columns.empty();
                     element.columns = std::move(columns);
                     element.any_database = any_database;
+                    element.any_named_collection = any_named_collection;
                     element.database = database_name;
                     element.any_table = any_table;
                     element.table = table_name;

@@ -198,6 +198,7 @@ namespace
         DATABASE_LEVEL,
         TABLE_LEVEL,
         COLUMN_LEVEL,
+        NAMED_COLLECTION_LEVEL,
     };
 
     AccessFlags getAllGrantableFlags(Level level)
@@ -208,6 +209,7 @@ namespace
             case DATABASE_LEVEL: return AccessFlags::allFlagsGrantableOnDatabaseLevel();
             case TABLE_LEVEL: return AccessFlags::allFlagsGrantableOnTableLevel();
             case COLUMN_LEVEL: return AccessFlags::allFlagsGrantableOnColumnLevel();
+            case NAMED_COLLECTION_LEVEL: return AccessFlags::allFlagsGrantableOnNamedCollectionLevel();
         }
         UNREACHABLE();
     }

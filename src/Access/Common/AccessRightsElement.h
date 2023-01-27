@@ -17,6 +17,7 @@ struct AccessRightsElement
     bool any_database = true;
     bool any_table = true;
     bool any_column = true;
+    bool any_named_collection = true;
     bool grant_option = false;
     bool is_partial_revoke = false;
 
@@ -44,7 +45,7 @@ struct AccessRightsElement
 
     bool empty() const { return !access_flags || (!any_column && columns.empty()); }
 
-    auto toTuple() const { return std::tie(access_flags, any_database, database, any_table, table, any_column, columns, grant_option, is_partial_revoke); }
+    auto toTuple() const { return std::tie(access_flags, any_database, database, any_table, table, any_column, any_named_collection, columns, grant_option, is_partial_revoke); }
     friend bool operator==(const AccessRightsElement & left, const AccessRightsElement & right) { return left.toTuple() == right.toTuple(); }
     friend bool operator!=(const AccessRightsElement & left, const AccessRightsElement & right) { return !(left == right); }
 

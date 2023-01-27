@@ -27,10 +27,14 @@ namespace
     }
 
 
-    void formatONClause(const String & database, bool any_database, const String & table, bool any_table, const IAST::FormatSettings & settings)
+    void formatONClause(const String & database, bool any_database, const String & table, bool any_table, bool any_named_collection, const IAST::FormatSettings & settings)
     {
         settings.ostr << (settings.hilite ? IAST::hilite_keyword : "") << "ON " << (settings.hilite ? IAST::hilite_none : "");
-        if (any_database)
+        if (!any_named_collection)
+        {
+            settings.ostr << backQuoteIfNeed(table);
+        }
+        else if (any_database)
         {
             settings.ostr << "*.*";
         }
@@ -78,7 +82,7 @@ namespace
             if (!next_element_on_same_db_and_table)
             {
                 settings.ostr << " ";
-                formatONClause(element.database, element.any_database, element.table, element.any_table, settings);
+                formatONClause(element.database, element.any_database, element.table, element.any_table, element.any_named_collection, settings);
             }
         }
 

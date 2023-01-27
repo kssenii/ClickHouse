@@ -100,10 +100,12 @@ namespace
         const Flags & getTableFlags() const { return all_flags_for_target[TABLE]; }
         const Flags & getColumnFlags() const { return all_flags_for_target[COLUMN]; }
         const Flags & getDictionaryFlags() const { return all_flags_for_target[DICTIONARY]; }
+        const Flags & getNamedCollectionFlags() const { return all_flags_for_target[NAMED_COLLECTION]; }
         const Flags & getAllFlagsGrantableOnGlobalLevel() const { return getAllFlags(); }
         const Flags & getAllFlagsGrantableOnDatabaseLevel() const { return all_flags_grantable_on_database_level; }
         const Flags & getAllFlagsGrantableOnTableLevel() const { return all_flags_grantable_on_table_level; }
         const Flags & getAllFlagsGrantableOnColumnLevel() const { return getColumnFlags(); }
+        const Flags & getAllFlagsGrantableOnNamedCollectionLevel() const { return getNamedCollectionFlags(); }
 
     private:
         enum NodeType
@@ -116,6 +118,7 @@ namespace
             VIEW = TABLE,
             COLUMN,
             DICTIONARY,
+            NAMED_COLLECTION,
         };
 
         struct Node;
@@ -345,7 +348,7 @@ namespace
         std::unordered_map<std::string_view, Flags> keyword_to_flags_map;
         std::vector<Flags> access_type_to_flags_mapping;
         Flags all_flags;
-        Flags all_flags_for_target[static_cast<size_t>(DICTIONARY) + 1];
+        Flags all_flags_for_target[static_cast<size_t>(NAMED_COLLECTION) + 1];
         Flags all_flags_grantable_on_database_level;
         Flags all_flags_grantable_on_table_level;
     };
@@ -365,10 +368,12 @@ AccessFlags AccessFlags::allDatabaseFlags() { return Helper::instance().getDatab
 AccessFlags AccessFlags::allTableFlags() { return Helper::instance().getTableFlags(); }
 AccessFlags AccessFlags::allColumnFlags() { return Helper::instance().getColumnFlags(); }
 AccessFlags AccessFlags::allDictionaryFlags() { return Helper::instance().getDictionaryFlags(); }
+AccessFlags AccessFlags::allNamedCollectionFlags() { return Helper::instance().getNamedCollectionFlags(); }
 AccessFlags AccessFlags::allFlagsGrantableOnGlobalLevel() { return Helper::instance().getAllFlagsGrantableOnGlobalLevel(); }
 AccessFlags AccessFlags::allFlagsGrantableOnDatabaseLevel() { return Helper::instance().getAllFlagsGrantableOnDatabaseLevel(); }
 AccessFlags AccessFlags::allFlagsGrantableOnTableLevel() { return Helper::instance().getAllFlagsGrantableOnTableLevel(); }
 AccessFlags AccessFlags::allFlagsGrantableOnColumnLevel() { return Helper::instance().getAllFlagsGrantableOnColumnLevel(); }
+AccessFlags AccessFlags::allFlagsGrantableOnNamedCollectionLevel() { return Helper::instance().getAllFlagsGrantableOnNamedCollectionLevel(); }
 
 AccessFlags operator |(AccessType left, AccessType right) { return AccessFlags(left) | right; }
 AccessFlags operator &(AccessType left, AccessType right) { return AccessFlags(left) & right; }

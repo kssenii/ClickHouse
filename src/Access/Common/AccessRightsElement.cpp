@@ -21,10 +21,14 @@ namespace
         result += ")";
     }
 
-    void formatONClause(const String & database, bool any_database, const String & table, bool any_table, String & result)
+    void formatONClause(const String & database, bool any_database, const String & table, bool any_table, bool any_named_collection, String & result)
     {
         result += "ON ";
-        if (any_database)
+        if (!any_named_collection)
+        {
+            result += backQuoteIfNeed(table);
+        }
+        else if (any_database)
         {
             result += "*.*";
         }
@@ -96,7 +100,7 @@ namespace
         String result;
         formatAccessFlagsWithColumns(element.access_flags, element.columns, element.any_column, result);
         result += " ";
-        formatONClause(element.database, element.any_database, element.table, element.any_table, result);
+        formatONClause(element.database, element.any_database, element.table, element.any_table, element.any_named_collection, result);
         if (with_options)
             formatOptions(element.grant_option, element.is_partial_revoke, result);
         return result;
@@ -199,6 +203,8 @@ void AccessRightsElement::eraseNonGrantable()
         access_flags &= AccessFlags::allFlagsGrantableOnTableLevel();
     else if (!any_database)
         access_flags &= AccessFlags::allFlagsGrantableOnDatabaseLevel();
+    else if (!any_named_collection)
+        access_flags &= AccessFlags::allFlagsGrantableOnNamedCollectionLevel();
     else
         access_flags &= AccessFlags::allFlagsGrantableOnGlobalLevel();
 }
