@@ -14,13 +14,14 @@ namespace DB
 struct StreamSettings
 {
     /// Check if setting is enabled, otherwise use common `max_block_size` setting.
-    size_t max_read_mysql_row_nums;
-    size_t max_read_mysql_bytes_size;
-    bool auto_close;
-    bool fetch_by_name;
-    size_t default_num_tries_on_connection_loss;
+    size_t max_read_mysql_row_nums = 0;
+    size_t max_read_mysql_bytes_size = 0;
+    bool auto_close = false;
+    bool fetch_by_name = false;
+    size_t default_num_tries_on_connection_loss = 0;
 
-    StreamSettings(const Settings & settings, bool auto_close_ = false, bool fetch_by_name_ = false, size_t max_retry_ = 5);
+    StreamSettings() = default;
+    explicit StreamSettings(const Settings & settings, bool auto_close_ = false, bool fetch_by_name_ = false, size_t max_retry_ = 5);
 
 };
 

@@ -60,15 +60,10 @@ void registerDictionarySourceMysql(DictionarySourceFactory & factory)
                                    const std::string & /* default_database */,
                                    [[maybe_unused]] bool created_from_ddl) -> DictionarySourcePtr {
 #if USE_MYSQL
-        StreamSettings mysql_input_stream_settings(
-            global_context->getSettingsRef(),
-            config.getBool(config_prefix + ".mysql.close_connection", false) || config.getBool(config_prefix + ".mysql.share_connection", false),
-            false,
-            config.getBool(config_prefix + ".mysql.fail_on_connection_loss", false) ? 1 : default_num_tries_on_connection_loss);
-
         auto settings_config_prefix = config_prefix + ".mysql";
         std::shared_ptr<mysqlxx::PoolWithFailover> pool;
         MySQLSettings mysql_settings;
+        StreamSettings mysql_input_stream_settings;
 
         std::optional<MySQLDictionarySource::Configuration> dictionary_configuration;
         auto named_collection = created_from_ddl ? tryGetNamedCollectionWithOverrides(config, settings_config_prefix) : nullptr;
@@ -95,6 +90,12 @@ void registerDictionarySourceMysql(DictionarySourceFactory & factory)
 
             for (auto & address : addresses)
                 global_context->getRemoteHostFilter().checkHostAndPort(address.first, toString(address.second));
+
+            mysql_input_stream_settings = StreamSettings(
+                global_context->getSettingsRef(),
+                named_collection->getOrDefault<bool>("close_connection", false) || named_collection->getOrDefault<bool>("share_connection", false),
+                false,
+                named_collection->getOrDefault<bool>("fail_on_connection_loss", false) ? 1 : default_num_tries_on_connection_loss);
 
             dictionary_configuration.emplace(MySQLDictionarySource::Configuration{
                 .db = named_collection->getAnyOrDefault<String>({"database", "db"}, ""),
@@ -130,6 +131,12 @@ void registerDictionarySourceMysql(DictionarySourceFactory & factory)
         }
         else
         {
+            mysql_input_stream_settings = StreamSettings(
+                global_context->getSettingsRef(),
+                config.getBool(config_prefix + ".mysql.close_connection", false) || config.getBool(config_prefix + ".mysql.share_connection", false),
+                false,
+                config.getBool(config_prefix + ".mysql.fail_on_connection_loss", false) ? 1 : default_num_tries_on_connection_loss);
+
             dictionary_configuration.emplace(MySQLDictionarySource::Configuration{
                 .db = config.getString(settings_config_prefix + ".db", ""),
                 .table = config.getString(settings_config_prefix + ".table", ""),
