@@ -19,6 +19,7 @@ RUN apt-get update \
     pigz \
     wget \
     git \
+    nmap \
     iproute2 \
     cgroupfs-mount \
     python3-pip \
@@ -103,13 +104,36 @@ COPY dockerd-entrypoint.sh /usr/local/bin/
 COPY compose/ /compose/
 COPY misc/ /misc/
 
-RUN curl -fsSL -O https://dlcdn.apache.org/spark/spark-3.3.2/spark-3.3.2-bin-hadoop3.tgz \
-    && tar xzvf spark-3.3.2-bin-hadoop3.tgz -C / \
-    && rm spark-3.3.2-bin-hadoop3.tgz
+ENV SPARK_VERSION=3.3.2
+ENV SPARK_MAJOR_VERSION=3.3
+ENV ICEBERG_VERSION=1.2.1
+
+# Download Java AWS SDK
+ENV AWSSDK_VERSION=2.20.18
+#RUN curl https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWSSDK_VERSION}/bundle-${AWSSDK_VERSION}.jar -Lo /opt/spark/jars/bundle-${AWSSDK_VERSION}.jar
+
+RUN curl -fsSL -O https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz \
+    && tar xzvf spark-${SPARK_VERSION}-bin-hadoop3.tgz -C / \
+    && rm spark-${SPARK_VERSION}-bin-hadoop3.tgz
 
 # download spark and packages
 # if you change packages, don't forget to update them in tests/integration/helpers/cluster.py
-RUN echo ":quit" | /spark-3.3.2-bin-hadoop3/bin/spark-shell --packages "org.apache.hudi:hudi-spark3.3-bundle_2.12:0.13.0,io.delta:delta-core_2.12:2.2.0,org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.1.0" > /dev/null
+RUN echo ":quit" | /spark-${SPARK_VERSION}-bin-hadoop3/bin/spark-shell --packages "\
+org.apache.hudi:hudi-spark3.3-bundle_2.12:0.13.0,\
+io.delta:delta-core_2.12:2.2.0,\
+org.apache.iceberg:iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_2.12:${ICEBERG_VERSION},\
+software.amazon.awssdk:bundle:${AWSSDK_VERSION},\
+com.amazonaws:aws-java-sdk:1.12.4,\
+#apache.hadoop:hadoop-aws:3.3.5,\
+software.amazon.awssdk:url-connection-client:${AWSSDK_VERSION}" > /dev/null
+
+ENV SPARK_HOME="/spark-3.3.2-bin-hadoop3"
+#RUN curl https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_2.12/${ICEBERG_VERSION}/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_2.12-${ICEBERG_VERSION}.jar -Lo /opt/spark/jars/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_2.12-${ICEBERG_VERSION}.jar
+#RUN curl https://repo1.maven.org/maven2/software/amazon/awssdk/url-connection-client/${AWSSDK_VERSION}/url-connection-client-${AWSSDK_VERSION}.jar -Lo /opt/spark/jars/url-connection-client-${AWSSDK_VERSION}.jar
+
+ENV AWS_ACCESS_KEY_ID=minio
+ENV AWS_SECRET_ACCESS_KEY=minio123
+ENV AWS_REGION="eu-east-1"
 
 RUN set -x \
   && addgroup --system dockremap \

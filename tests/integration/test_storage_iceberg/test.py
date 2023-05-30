@@ -9,6 +9,7 @@ import json
 import pytest
 import time
 import glob
+import shutil
 
 from pyspark.sql.types import (
     StructType,
@@ -29,28 +30,66 @@ from pyspark.sql.readwriter import DataFrameWriter, DataFrameWriterV2
 from helpers.s3_tools import prepare_s3_bucket, upload_directory, get_file_contents
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+CURRENT_TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
-def get_spark():
+def get_spark(warehouse="/iceberg_data"):
+    os.environ["AWS_ACCESS_KEY_ID"] = "minio"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "minio123"
+    os.environ["AWS_REGION"] = "eu-east-1"
     builder = (
         pyspark.sql.SparkSession.builder.appName("spark_test")
         .config(
             "spark.sql.catalog.spark_catalog",
             "org.apache.iceberg.spark.SparkSessionCatalog",
         )
-        .config("spark.sql.catalog.local", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.spark_catalog.type", "hadoop")
-        .config("spark.sql.catalog.spark_catalog.warehouse", "/iceberg_data")
-        .master("local")
+        #.config('spark.hadoop.fs.s3a.aws.credentials.provider', 'org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider')
+        .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+        .config("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.spark_catalog.catalog-impl", "org.apache.iceberg.rest.RESTCatalog")
+        .config("spark.sql.catalog.spark_catalog.uri", "http://127.0.0.1:8181")
+        .config("spark.sql.catalog.spark_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config("spark.sql.catalog.spark_catalog.warehouse", "s3a://warehouse/wh/")
+        .config("spark.sql.catalog.spark_catalog.s3.endpoint", "http://minio:9001")
+        .config("spark.sql.defaultCatalog", "spark_catalog")
+        .config("spark.eventLog.enabled", "false")
+        #.config("spark.eventLog.dir", "/home/iceberg/spark-events")
+        #.config("spark.history.fs.logDirectory", "/home/iceberg/spark-events")
+        .config("spark.sql.catalogImplementation", "in-memory")
+        #.config("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkCatalog")
+        #.config("spark.sql.catalog.spark_catalog.type", "hadoop")
+        #.config("spark.sql.catalog.spark_catalog.warehouse", "s3a://warehouse/")
+        #.config("spark.sql.catalog.spark_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        #.config("spark.sql.catalog.spark_catalog.s3_endpoint", "http://minio:9000/warehouse/")
+        #.config("spark.hadoop.fs.s3a.access.key", "admin") \
+        #.config("spark.hadoop.fs.s3a.secret.key", "password") \
+        #.config("spark.hadoop.fs.s3a.endpoint", "minio:9000/warehouse/") \
+        #.config("spark.hadoop.fs.s3a.path.style.access", "true") \
+        #.config("spark.hadoop.fs.s3a.connection.establish.timeout", "5000") \
+        #.config("spark.hadoop.fs.s3a.connection.timeout", "10000") \
+        #.master("local")
     )
     return builder.master("local").getOrCreate()
+
+#def get_spark():
+#    builder = (
+#        pyspark.sql.SparkSession.builder.appName("spark_test")
+#        .config(
+#            "spark.sql.catalog.spark_catalog",
+#            "org.apache.iceberg.spark.SparkSessionCatalog",
+#        )
+#        .config("spark.sql.catalog.local", "org.apache.iceberg.spark.SparkCatalog")
+#        .config("spark.sql.catalog.spark_catalog.type", "hadoop")
+#        .config("spark.sql.catalog.spark_catalog.warehouse", "/iceberg_data")
+#        .master("local")
+#    )
+#    return builder.master("local").getOrCreate()
 
 
 @pytest.fixture(scope="module")
 def started_cluster():
     try:
         cluster = ClickHouseCluster(__file__, with_spark=True)
-        cluster.add_instance(
+        instance = cluster.add_instance(
             "node1",
             main_configs=["configs/config.d/named_collections.xml"],
             with_minio=True,
@@ -59,15 +98,35 @@ def started_cluster():
         logging.info("Starting cluster...")
         cluster.start()
 
+        print("kssenii 1")
+
+        instance.exec_in_container(
+            [
+                "bash",
+                "-c",
+                "ls -la",
+            ],
+            user="root",
+        )
+        shutil.copyfile(
+            os.path.join(CURRENT_TEST_DIR, "./configs/spark_defaults_s3.conf"),
+            "/spark-3.3.2-bin-hadoop3/conf/spark_defaults.conf"
+        )
+        print("kssenii 2")
+
         prepare_s3_bucket(cluster)
         logging.info("S3 bucket created")
 
+        print("kssenii 3")
         cluster.spark_session = get_spark()
+        print("kssenii 4")
 
         yield cluster
 
     finally:
-        cluster.shutdown()
+        #time.sleep(500)
+        pass
+        #cluster.shutdown()
 
 
 def run_query(instance, query, stdin=None, settings=None):
@@ -312,3 +371,32 @@ def test_types(started_cluster, format_version):
             ["e", "Nullable(Bool)"],
         ]
     )
+
+def test_s3(started_cluster):
+    instance = started_cluster.instances["node1"]
+    spark = started_cluster.spark_session
+    minio_client = started_cluster.minio_client
+    bucket = started_cluster.minio_bucket
+    TABLE_NAME = "test_s3"
+
+    data = [
+        (
+            123,
+            "string",
+            datetime.strptime("2000-01-01", "%Y-%m-%d"),
+            ["str1", "str2"],
+            True,
+        )
+    ]
+    schema = StructType(
+        [
+            StructField("a", IntegerType()),
+            StructField("b", StringType()),
+            StructField("c", DateType()),
+            StructField("d", ArrayType(StringType())),
+            StructField("e", BooleanType()),
+        ]
+    )
+    df = spark.createDataFrame(data=data, schema=schema)
+    df.printSchema()
+    df.writeTo("kssenii").using("iceberg").create()

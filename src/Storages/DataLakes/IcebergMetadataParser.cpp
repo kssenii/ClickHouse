@@ -84,8 +84,7 @@ struct IcebergMetadataParser<Configuration, MetadataReadHelper>::Impl
      *     "last-updated-ms" : 1680206743150,
      *     "last-column-id" : 2,
      *     "schema" : { "type" : "struct", "schema-id" : 0, "fields" : [ {<field1_info>}, {<field2_info>}, ... ] },
-     *     "current-schema-id" : 0,
-     *     "schemas" : [ ],
+     *     "current-schema-id" : 0, *     "schemas" : [ ],
      *     ...
      *     "current-snapshot-id" : 2819310504515118887,
      *     "refs" : { "main" : { "snapshot-id" : 2819310504515118887, "type" : "branch" } },
@@ -246,6 +245,7 @@ struct IcebergMetadataParser<Configuration, MetadataReadHelper>::Impl
             for (size_t i = 0; i < str_col->size(); ++i)
             {
                 const auto data_path = std::string(str_col->getDataAt(i).toView());
+                LOG_TEST(log, "Found data path: {}", data_path);
                 const auto pos = data_path.find(configuration.url.key);
                 if (pos == std::string::npos)
                     throw Exception(ErrorCodes::BAD_ARGUMENTS, "Expected to find {} in data path: {}", configuration.url.key, data_path);
@@ -278,6 +278,7 @@ struct IcebergMetadataParser<Configuration, MetadataReadHelper>::Impl
         return columns;
     }
 
+    Poco::Logger * log = &Poco::Logger::get("IcebergMetadataParser");
 };
 
 

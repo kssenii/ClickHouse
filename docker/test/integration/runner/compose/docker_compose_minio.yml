@@ -15,6 +15,10 @@ services:
       MINIO_SECRET_KEY: minio123
       MINIO_PROMETHEUS_AUTH_TYPE: public
     command: server --address :9001 --certs-dir /certs /data1-1
+    #networks:
+    #  iceberg_net:
+    #    aliases:
+    #      - warehouse.minio1
     depends_on:
       - proxy1
       - proxy2
@@ -46,3 +50,5 @@ services:
 
 volumes:
   data1-1:
+#networks:
+#  iceberg_net:

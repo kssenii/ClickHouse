@@ -379,6 +379,12 @@ class ClickHouseCluster:
         self.env_variables["TSAN_OPTIONS"] = "use_sigaltstack=0"
         self.env_variables["CLICKHOUSE_WATCHDOG_ENABLE"] = "0"
         self.env_variables["CLICKHOUSE_NATS_TLS_SECURE"] = "0"
+
+        self.env_variables["AWS_ACCESS_KEY_ID"] = "minio"
+        self.env_variables["AWS_SECRET_ACCESS_KEY"] = "minio123"
+        self.env_variables["AWS_REGION"] = "eu-east-1"
+    #- AWS_REGION=us-east-1
+
         self.up_called = False
 
         custom_dockerd_host = custom_dockerd_host or os.environ.get(
@@ -623,15 +629,19 @@ class ClickHouseCluster:
         if with_spark:
             # if you change packages, don't forget to update them in docker/test/integration/runner/dockerd-entrypoint.sh
             (
-                pyspark.sql.SparkSession.builder.appName("spark_test")
-                .config(
-                    "spark.jars.packages",
-                    "org.apache.hudi:hudi-spark3.3-bundle_2.12:0.13.0,io.delta:delta-core_2.12:2.2.0,org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.1.0",
-                )
-                .master("local")
-                .getOrCreate()
-                .stop()
+                pyspark.sql.SparkSession.builder.appName("spark_test").config("spark.jars.packages", "org.apache.hudi:hudi-spark3.3-bundle_2.12:0.13.0,io.delta:delta-core_2.12:2.2.0,org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.1.0,org.apache.hadoop:hadoop-aws:3.3.5,org.apache.hadoop:hadoop-client:3.3.5,com.amazonaws:aws-java-sdk:1.12.4,software.amazon.awssdk:bundle:2.20.6,software.amazon.awssdk:url-connection-client:2.20.18").master("local").getOrCreate().stop()
             )
+            # if you change packages, don't forget to update them in docker/test/integration/runner/dockerd-entrypoint.sh
+            #(
+            #    pyspark.sql.SparkSession.builder.appName("spark_test")
+            #    .config(
+            #        "spark.jars.packages",
+            #        "org.apache.hudi:hudi-spark3.3-bundle_2.12:0.13.0,io.delta:delta-core_2.12:2.2.0,org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.1.0",
+            #    )
+            #    .master("local")
+            #    .getOrCreate()
+            #    .stop()
+            #)
 
     @property
     def kafka_port(self):
@@ -1387,6 +1397,21 @@ class ClickHouseCluster:
         ]
         return self.base_minio_cmd
 
+    def setup_rest_cmd(self, instance, env_variables, docker_compose_yml_dir):
+        self.base_cmd.extend(
+            ["--file", p.join(docker_compose_yml_dir, "docker_compose_spark_rest.yml")]
+        )
+        self.base_rest_cmd = [
+            "docker-compose",
+            "--env-file",
+            instance.env_file,
+            "--project-name",
+            self.project_name,
+            "--file",
+            p.join(docker_compose_yml_dir, "docker_compose_spark_rest.yml"),
+        ]
+        return self.base_rest_cmd
+
     def setup_azurite_cmd(self, instance, env_variables, docker_compose_yml_dir):
         self.with_azurite = True
         self.base_cmd.extend(
@@ -1793,6 +1818,9 @@ class ClickHouseCluster:
             )
 
         if with_minio and not self.with_minio:
+            cmds.append(
+                self.setup_rest_cmd(instance, env_variables, docker_compose_yml_dir)
+            )
             cmds.append(
                 self.setup_minio_cmd(instance, env_variables, docker_compose_yml_dir)
             )
@@ -2422,7 +2450,7 @@ class ClickHouseCluster:
 
                 logging.debug("Connected to Minio.")
 
-                buckets = [self.minio_bucket, self.minio_bucket_2]
+                buckets = [self.minio_bucket, self.minio_bucket_2, "warehouse"]
 
                 for bucket in buckets:
                     if minio_client.bucket_exists(bucket):
