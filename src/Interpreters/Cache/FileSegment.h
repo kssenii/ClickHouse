@@ -120,10 +120,6 @@ public:
 
     ~FileSegment() = default;
 
-    State state() const;
-
-    static String stateToString(FileSegment::State state);
-
     /// Represents an interval [left, right] including both boundaries.
     struct Range
     {
@@ -141,15 +137,15 @@ public:
 
     static String getCallerId();
 
-    String getInfoForLog() const;
-
     /**
      * ========== Methods to get file segment's constant state ==================
      */
 
+    State state() const;
+
     const Range & range() const { return segment_range; }
 
-    const Key & key() const { return file_key; }
+    const Key & key() const { return cache_key; }
 
     size_t offset() const { return range().left; }
 
@@ -169,18 +165,14 @@ public:
 
     bool isDownloader() const;
 
-    DownloaderId getDownloader() const;
-
     /// Wait for the change of state from DOWNLOADING to any other.
     State wait(size_t offset);
 
     bool isDownloaded() const;
 
-    size_t getHitsCount() const { return hits_count; }
+    size_t getHitsCount() const;
 
     size_t getRefCount() const { return ref_count; }
-
-    void incrementHitsCount() { ++hits_count; }
 
     size_t getCurrentWriteOffset(bool sync) const;
 
@@ -190,37 +182,21 @@ public:
 
     size_t getReservedSize() const;
 
-    /// Now detached status can be used in the following cases:
-    /// 1. there is only 1 remaining file segment holder
-    ///    && it does not need this segment anymore
-    ///    && this file segment was in cache and needs to be removed
-    /// 2. in read_from_cache_if_exists_otherwise_bypass_cache case to create NOOP file segments.
-    /// 3. removeIfExists - method which removes file segments from cache even though
-    ///    it might be used at the moment.
-
     /// If file segment is detached it means the following:
     /// 1. It is not present in FileCache, e.g. will not be visible to any cache user apart from
     /// those who acquired shared pointer to this file segment before it was detached.
     /// 2. Detached file segment can still be hold by some cache users, but it's state became
     /// immutable at the point it was detached, any non-const / stateful method will throw an
     /// exception.
-    void detach(const FileSegmentGuard::Lock &, const LockedKey &);
-
-    static FileSegmentPtr getSnapshot(const FileSegmentPtr & file_segment);
-
-    bool isDetached() const;
-
-    /// File segment has a completed state, if this state is final and
-    /// is not going to be changed. Completed states: DOWNALODED, DETACHED.
-    bool isCompleted(bool sync = false) const;
+    void detach(const FileSegmentGuard::Lock &);
 
     void use();
 
     /**
-     * ========== Methods used by `cache` ========================
+     * ========== Methods to get FileSegment's mutable state ========================
      */
 
-    FileSegmentGuard::Lock lock() const { return segment_guard.lock(); }
+    FileSegmentGuard::Lock lockFileSegment() const;
 
     Priority::Iterator getQueueIterator() const;
 
@@ -231,6 +207,16 @@ public:
     KeyMetadataPtr getKeyMetadata() const;
 
     bool assertCorrectness() const;
+
+    String getInfoForLog() const;
+
+    static FileSegmentPtr getSnapshot(const FileSegmentPtr & file_segment);
+
+    bool isDetached() const;
+
+    /// File segment has a completed state, if this state is final and
+    /// is not going to be changed. Completed states: DOWNALODED, DETACHED.
+    bool isCompleted(bool sync = false) const;
 
     /**
      * ========== Methods that must do cv.notify() ==================
@@ -258,11 +244,6 @@ public:
     /// Write data into reserved space.
     void write(const char * from, size_t size, size_t offset);
 
-    // Invariant: if state() != DOWNLOADING and remote file reader is present, the reader's
-    // available() == 0, and getFileOffsetOfBufferEnd() == our getCurrentWriteOffset().
-    //
-    // The reader typically requires its internal_buffer to be assigned from the outside before
-    // calling next().
     RemoteFileReaderPtr getRemoteFileReader();
 
     RemoteFileReaderPtr extractRemoteFileReader();
@@ -271,31 +252,26 @@ public:
 
     void setRemoteFileReader(RemoteFileReaderPtr remote_file_reader_);
 
+    /// This method is for "temporary data" in cache. Do not confuse it with filesystem cache.
     void setDownloadedSize(size_t delta);
 
 private:
-    String getDownloaderUnlocked(const FileSegmentGuard::Lock &) const;
-    bool isDownloaderUnlocked(const FileSegmentGuard::Lock & segment_lock) const;
-    void resetDownloaderUnlocked(const FileSegmentGuard::Lock &);
-
     void setDownloadState(State state, const FileSegmentGuard::Lock &);
-    void resetDownloadingStateUnlocked(const FileSegmentGuard::Lock &);
-    void setDetachedState(const FileSegmentGuard::Lock &);
-
-    String getInfoForLogUnlocked(const FileSegmentGuard::Lock &) const;
-
     void setDownloadedUnlocked(const FileSegmentGuard::Lock &);
     void setDownloadFailedUnlocked(const FileSegmentGuard::Lock &);
 
-    void assertNotDetached() const;
+    void resetDownloaderUnlocked(const FileSegmentGuard::Lock &);
+    void resetDownloadingStateUnlocked(const FileSegmentGuard::Lock &);
+
+    String getInfoForLogUnlocked(const FileSegmentGuard::Lock &) const;
+
     void assertNotDetachedUnlocked(const FileSegmentGuard::Lock &) const;
     void assertIsDownloaderUnlocked(const std::string & operation, const FileSegmentGuard::Lock &) const;
     bool assertCorrectnessUnlocked(const FileSegmentGuard::Lock &) const;
 
     LockedKeyPtr lockKeyMetadata(bool assert_exists = true) const;
-    FileSegmentGuard::Lock lockFileSegment() const;
 
-    Key file_key;
+    const Key cache_key;
     Range segment_range;
     const FileSegmentKind segment_kind;
     /// Size of the segment is not known until it is downloaded and
@@ -311,18 +287,18 @@ private:
     /// downloaded_size should always be less or equal to reserved_size
     std::atomic<size_t> downloaded_size = 0;
     std::atomic<size_t> reserved_size = 0;
-    mutable std::mutex download_mutex;
 
+    mutable std::mutex download_mutex;
     mutable FileSegmentGuard segment_guard;
+    std::condition_variable cv;
+
     std::weak_ptr<KeyMetadata> key_metadata;
     mutable Priority::Iterator queue_iterator; /// Iterator is put here on first reservation attempt, if successful.
     FileCache * cache;
-    std::condition_variable cv;
 
     Poco::Logger * log;
 
-    std::atomic<size_t> hits_count = 0; /// cache hits.
-    std::atomic<size_t> ref_count = 0; /// Used for getting snapshot state
+    size_t ref_count = 0; /// Used for getting snapshot state
 
     CurrentMetrics::Increment metric_increment{CurrentMetrics::CacheFileSegments};
 };

@@ -7,9 +7,17 @@
 #include <Interpreters/Cache/FileCacheKey.h>
 #include <Interpreters/Cache/Guards.h>
 #include <Interpreters/Cache/FileCache_fwd_internal.h>
+#include <Common/CurrentMetrics.h>
+
+namespace CurrentMetrics
+{
+    extern const Metric FilesystemCacheSize;
+    extern const Metric FilesystemCacheElements;
+}
 
 namespace DB
 {
+struct LockedFileSegmentMetadata;
 
 /// IFileCachePriority is used to maintain the priority of cached data.
 class IFileCachePriority : private boost::noncopyable
@@ -17,42 +25,44 @@ class IFileCachePriority : private boost::noncopyable
 public:
     using Key = FileCacheKey;
     using KeyAndOffset = FileCacheKeyAndOffset;
+    using Entry = FileSegmentMetadataPtr;
+    using LockedEntry = LockedFileSegmentMetadata;
 
-    struct Entry
+    struct Stat
     {
-        Entry(const Key & key_, size_t offset_, size_t size_, KeyMetadataPtr key_metadata_)
-            : key(key_), offset(offset_), size(size_), key_metadata(key_metadata_) {}
+        std::atomic<size_t> current_size = 0;
+        std::atomic<size_t> current_elements_num = 0;
 
-        Entry(const Entry & other)
-            : key(other.key), offset(other.offset), size(other.size.load()), hits(other.hits), key_metadata(other.key_metadata) {}
+        void updateSize(int64_t size)
+        {
+            chassert(static_cast<int64_t>(current_size) + size >= 0);
+            current_size += size;
+            CurrentMetrics::add(CurrentMetrics::FilesystemCacheSize, size);
+        }
 
-        const Key key;
-        const size_t offset;
-        std::atomic<size_t> size;
-        size_t hits = 0;
-        const KeyMetadataPtr key_metadata;
+        void updateElements(int64_t num)
+        {
+            chassert(static_cast<int64_t>(current_elements_num) + num >= 0);
+            current_elements_num += num;
+            CurrentMetrics::add(CurrentMetrics::FilesystemCacheElements, num);
+        }
     };
 
-    /// Provides an iterator to traverse the cache priority. Under normal circumstances,
-    /// the iterator can only return the records that have been directly swapped out.
-    /// For example, in the LRU algorithm, it can traverse all records, but in the LRU-K, it
-    /// can only traverse the records in the low priority queue.
+    /// A priority iterator.
+    /// Allows to increase priority of specific entry,
+    /// or to remote it.
     class IIterator
     {
     public:
         virtual ~IIterator() = default;
 
-        virtual size_t use(const CacheGuard::Lock &) = 0;
-
-        virtual std::shared_ptr<IIterator> remove(const CacheGuard::Lock &) = 0;
-
         virtual const Entry & getEntry() const = 0;
 
         virtual Entry & getEntry() = 0;
 
-        virtual void invalidate() = 0;
+        virtual size_t use(const CacheGuard::Lock &) = 0;
 
-        virtual void updateSize(int64_t size) = 0;
+        virtual std::shared_ptr<IIterator> remove(const CacheGuard::Lock &) = 0;
     };
 
     using Iterator = std::shared_ptr<IIterator>;
@@ -64,33 +74,36 @@ public:
         CONTINUE,
         REMOVE_AND_CONTINUE,
     };
-    using IterateFunc = std::function<IterationResult(LockedKey &, const FileSegmentMetadataPtr &)>;
 
     IFileCachePriority(size_t max_size_, size_t max_elements_) : max_size(max_size_), max_elements(max_elements_) {}
 
     virtual ~IFileCachePriority() = default;
 
+    Stat & getStat() { return stat; }
+
     size_t getElementsLimit() const { return max_elements; }
 
     size_t getSizeLimit() const { return max_size; }
 
-    virtual size_t getSize(const CacheGuard::Lock &) const = 0;
+    size_t getSize(const CacheGuard::Lock &) const { return stat.current_size; }
 
-    virtual size_t getElementsCount(const CacheGuard::Lock &) const = 0;
+    size_t getElementsCount(const CacheGuard::Lock &) const  { return stat.current_elements_num; }
 
-    virtual Iterator add(
-        KeyMetadataPtr key_metadata, size_t offset, size_t size, const CacheGuard::Lock &) = 0;
+    virtual Iterator add(const Entry & entry, const CacheGuard::Lock &) = 0;
 
     virtual void pop(const CacheGuard::Lock &) = 0;
 
     virtual void removeAll(const CacheGuard::Lock &) = 0;
 
+    using IterateFunc = std::function<IterationResult(const LockedEntry &)>;
+
     /// From lowest to highest priority.
     virtual void iterate(IterateFunc && func, const CacheGuard::Lock &) = 0;
 
-private:
+protected:
     const size_t max_size = 0;
     const size_t max_elements = 0;
+    Stat stat;
 };
 
 }

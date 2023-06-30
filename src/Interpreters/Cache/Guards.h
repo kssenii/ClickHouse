@@ -100,6 +100,17 @@ struct KeyGuard : private boost::noncopyable
     std::mutex mutex;
 };
 
+struct CacheFileSegmentMetadataGuard : private boost::noncopyable
+{
+    struct Lock : public std::unique_lock<std::mutex>
+    {
+        explicit Lock(std::mutex & mutex_) : std::unique_lock<std::mutex>(mutex_) {}
+    };
+
+    Lock lock() { return Lock(mutex); }
+    std::mutex mutex;
+};
+
 /**
  * Guard for a file segment.
  */

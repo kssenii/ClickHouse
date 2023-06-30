@@ -510,9 +510,6 @@ bool CachedOnDiskReadBufferFromFile::completeFileSegmentAndGetNext()
     current_file_segment->use();
     implementation_buffer = getImplementationBuffer(*current_file_segment);
 
-    if (read_type == ReadType::CACHED)
-        current_file_segment->incrementHitsCount();
-
     LOG_TEST(
         log, "New segment range: {}, old range: {}",
         current_file_segment->range().toString(), completed_range.toString());
@@ -857,7 +854,7 @@ bool CachedOnDiskReadBufferFromFile::nextImplStep()
         implementation_buffer = getImplementationBuffer(file_segments->front());
 
         if (read_type == ReadType::CACHED)
-            file_segments->front().incrementHitsCount();
+            file_segments->front().use();
     }
 
     chassert(!internal_buffer.empty());
@@ -1080,7 +1077,7 @@ bool CachedOnDiskReadBufferFromFile::nextImplStep()
         available(),
         current_read_range.toString(),
         file_offset_of_buffer_end,
-        FileSegment::stateToString(file_segment.state()),
+        magic_enum::enum_name(file_segment.state()),
         file_segment.getCurrentWriteOffset(false),
         toString(read_type),
         read_until_position,

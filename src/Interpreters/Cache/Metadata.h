@@ -11,27 +11,103 @@ namespace DB
 class CleanupQueue;
 using CleanupQueuePtr = std::shared_ptr<CleanupQueue>;
 
+struct LockedFileSegmentMetadata;
+using LockedFileSegmentMetadataPtr = std::unique_ptr<LockedFileSegmentMetadata>;
 
-struct FileSegmentMetadata : private boost::noncopyable
+/// An element in a priority queue.
+class FileSegmentMetadata : boost::noncopyable
 {
-    using Priority = IFileCachePriority;
+public:
+    using Key = FileCacheKey;
+    using GlobalStat = IFileCachePriority::Stat;
+    using Guard = CacheFileSegmentMetadataGuard;
+    friend struct LockedFileSegmentMetadata;
+    friend struct EvictionCandidates;
 
-    explicit FileSegmentMetadata(FileSegmentPtr && file_segment_);
+    FileSegmentMetadata(FileSegmentPtr && file_segment_, size_t reserved_size_, GlobalStat & global_stat_);
 
-    bool releasable() const { return file_segment.unique(); }
+    ~FileSegmentMetadata();
 
-    size_t size() const;
+    const Key & key() const { return file_segment->key(); }
 
-    bool evicting() const { return removal_candidate.load(); }
+    size_t offset() const { return file_segment->offset(); }
 
-    Priority::Iterator getQueueIterator() const { return file_segment->getQueueIterator(); }
+    FileSegment::Range range() const { return file_segment->range(); }
 
-    FileSegmentPtr file_segment;
-    std::atomic<bool> removal_candidate{false};
+    bool operator == (const FileSegmentMetadata & other) const
+    {
+        return key() == other.key() && offset() == other.offset();
+    }
+
+    LockedFileSegmentMetadataPtr lock();
+
+    std::string toString() const { return fmt::format("{}:{}:{}", key(), offset(), reserved_size); }
+
+    const FileSegment & getFileSegment() const { return *file_segment; }
+
+    FileSegmentPtr getSnapshot() { return FileSegment::getSnapshot(file_segment); }
+
+    void unmarkEvicting();
+
+    size_t hits = 0;
+
+private:
+    const FileSegmentPtr file_segment;
+    IFileCachePriority::Stat & global_stat;
+    Guard guard;
+
+    bool isValid(const Guard::Lock &) const { return is_valid; }
+    void invalidate(const Guard::Lock &);
+    void updateSize(size_t size, const Guard::Lock &);
+    bool releasable(const Guard::Lock &) const { return file_segment.unique(); }
+    size_t size(const Guard::Lock &) const { return reserved_size; }
+    bool addToList(FileSegments & file_segments, const Guard::Lock &);
+
+    size_t reserved_size = 0;
+    bool is_valid = true;
+    bool evicting = false;
 };
 
 using FileSegmentMetadataPtr = std::shared_ptr<FileSegmentMetadata>;
 
+struct LockedFileSegmentMetadata : boost::noncopyable
+{
+    explicit LockedFileSegmentMetadata(FileSegmentMetadata & metadata_) : lock(metadata_.guard.lock()), metadata(metadata_) {}
+
+    const FileSegmentMetadata & get() const { return metadata; }
+
+    bool releasable() const { return metadata.releasable(lock); }
+
+    void markEvicting() const
+    {
+        if (!metadata.releasable(lock))
+        {
+            throw Exception();
+        }
+        metadata.evicting = true;
+    }
+    void unmarkEvicting() const
+    {
+        metadata.evicting = false;
+    }
+
+    void resetEvicting()
+    {
+        metadata.evicting = false;
+    }
+
+    size_t size() const { return metadata.size(lock); }
+
+    bool isValid() const { return metadata.isValid(lock); }
+
+    void invalidate() { metadata.invalidate(lock); }
+
+    void updateSize(int64_t size) { metadata.updateSize(size, lock); }
+    bool addToList(FileSegments & file_segments) { return metadata.addToList(file_segments, lock); }
+
+    CacheFileSegmentMetadataGuard::Lock lock;
+    FileSegmentMetadata & metadata;
+};
 
 struct KeyMetadata : public std::map<size_t, FileSegmentMetadataPtr>,
                      private boost::noncopyable,

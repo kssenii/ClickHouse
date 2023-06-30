@@ -21,8 +21,8 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-FileSegmentMetadata::FileSegmentMetadata(FileSegmentPtr && file_segment_)
-    : file_segment(std::move(file_segment_))
+FileSegmentMetadata::FileSegmentMetadata(FileSegmentPtr && file_segment_, size_t reserved_size_, GlobalStat & global_stat_)
+    : file_segment(std::move(file_segment_)), global_stat(global_stat_), reserved_size(reserved_size_)
 {
     switch (file_segment->state())
     {
@@ -37,16 +37,53 @@ FileSegmentMetadata::FileSegmentMetadata(FileSegmentPtr && file_segment_)
             break;
         }
         default:
+        {
             throw Exception(
-                ErrorCodes::LOGICAL_ERROR,
-                "Can create file segment with either EMPTY, DOWNLOADED, DOWNLOADING state, got: {}",
-                FileSegment::stateToString(file_segment->state()));
+                ErrorCodes::LOGICAL_ERROR, "Unexpected state of file segment "
+                "while creating file segment metadata. "
+                "Expected EMPTY, DOWNLOADED or DOWNLOADING state, got: {}",
+                magic_enum::enum_name(file_segment->state()));
+        }
     }
+
+    global_stat.updateSize(reserved_size);
+    global_stat.updateElements(1);
 }
 
-size_t FileSegmentMetadata::size() const
+FileSegmentMetadata::~FileSegmentMetadata()
 {
-    return file_segment->getReservedSize();
+    invalidate(guard.lock());
+}
+
+LockedFileSegmentMetadataPtr FileSegmentMetadata::lock()
+{
+    return std::make_unique<LockedFileSegmentMetadata>(*this);
+}
+
+void FileSegmentMetadata::invalidate(const Guard::Lock & lock)
+{
+    if (!isValid(lock))
+        return;
+
+    global_stat.updateSize(-reserved_size);
+    global_stat.updateElements(-1);
+    reserved_size = 0;
+    is_valid = false;
+}
+
+void FileSegmentMetadata::updateSize(size_t size, const Guard::Lock &)
+{
+    global_stat.updateSize(size);
+    reserved_size += size;
+}
+
+bool FileSegmentMetadata::addToList(FileSegments & file_segments, const Guard::Lock & lock)
+{
+    if (!isValid(lock))
+        return false;
+
+    file_segments.push_back(file_segment);
+    return true;
 }
 
 KeyMetadata::KeyMetadata(
@@ -383,7 +420,7 @@ void LockedKey::removeAllReleasable()
         }
 
         auto file_segment = it->second->file_segment;
-        it = removeFileSegment(file_segment->offset(), file_segment->lock());
+        it = removeFileSegment(file_segment->offset(), file_segment->lockFileSegment());
     }
 }
 
@@ -396,13 +433,14 @@ KeyMetadata::iterator LockedKey::removeFileSegment(size_t offset, const FileSegm
     auto file_segment = it->second->file_segment;
 
     LOG_DEBUG(
-        log, "Remove from cache. Key: {}, offset: {}, size: {}",
-        getKey(), offset, file_segment->reserved_size);
+        log, "Remove from cache. Key: {}, offset: {}, size: {}, kind: {}",
+        getKey(), offset, file_segment->reserved_size, file_segment->getKind());
 
     chassert(file_segment->assertCorrectnessUnlocked(segment_lock));
 
-    if (file_segment->queue_iterator)
-        file_segment->queue_iterator->invalidate();
+    auto * entry = it->second->getEntry();
+    if (entry)
+        entry->invalidate();
 
     const auto path = key_metadata->getFileSegmentPath(*file_segment);
     bool exists = fs::exists(path);
@@ -414,7 +452,7 @@ KeyMetadata::iterator LockedKey::removeFileSegment(size_t offset, const FileSegm
     else if (file_segment->downloaded_size)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Expected path {} to exist", path);
 
-    file_segment->detach(segment_lock, *this);
+    file_segment->detach(segment_lock);
     return key_metadata->erase(it);
 }
 
@@ -449,7 +487,12 @@ void LockedKey::shrinkFileSegmentToDownloadedSize(
         file_segment->cache, key_metadata, file_segment->queue_iterator);
 
     if (diff)
-        metadata->getQueueIterator()->updateSize(-diff);
+    {
+        auto * entry = metadata->getEntry();
+        if (!entry)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "No entry");
+        entry->updateSize(-diff);
+    }
 
     chassert(file_segment->assertCorrectnessUnlocked(segment_lock));
 }
