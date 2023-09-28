@@ -205,6 +205,8 @@ public:
         data_source_description.type = DataSourceType::S3_Plain;
     }
 
+    bool isReadOnly() const override { return true; }
+
     /// Notes:
     /// - supports BACKUP to this disk
     /// - does not support INSERT into MergeTree table on this disk
